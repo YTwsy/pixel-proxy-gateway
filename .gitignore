@@ -1,0 +1,11 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+*.iml
+.idea/
+third_party/
+dist/
+reports/

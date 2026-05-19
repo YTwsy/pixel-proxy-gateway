@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Pixel Proxy Gateway</string>
+    <string name="notification_channel_name">Proxy gateway</string>
+</resources>
