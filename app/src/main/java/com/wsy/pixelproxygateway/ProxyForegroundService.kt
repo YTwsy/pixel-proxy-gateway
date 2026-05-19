@@ -29,6 +29,7 @@ class ProxyForegroundService : Service() {
     private var processFuture: ScheduledFuture<*>? = null
     private var requestFuture: ScheduledFuture<*>? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var lastNotificationSnapshot: NotificationSnapshot? = null
     @Volatile private var config = ProxyConfig()
 
     override fun onCreate() {
@@ -294,14 +295,16 @@ class ProxyForegroundService : Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             getString(R.string.notification_channel_name),
-            NotificationManager.IMPORTANCE_LOW,
+            NotificationManager.IMPORTANCE_DEFAULT,
         )
         channel.description = "Proxy gateway foreground service"
         notificationManager.createNotificationChannel(channel)
     }
 
     private fun startAsForeground() {
-        val notification = buildNotification()
+        val status = statusStore.current()
+        lastNotificationSnapshot = notificationSnapshot(status)
+        val notification = buildNotification(status)
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -310,11 +313,14 @@ class ProxyForegroundService : Service() {
     }
 
     private fun updateNotification() {
-        notificationManager.notify(NOTIFICATION_ID, buildNotification())
+        val status = statusStore.current()
+        val snapshot = notificationSnapshot(status)
+        if (snapshot == lastNotificationSnapshot) return
+        lastNotificationSnapshot = snapshot
+        notificationManager.notify(NOTIFICATION_ID, buildNotification(status))
     }
 
-    private fun buildNotification(): Notification {
-        val status = statusStore.current()
+    private fun buildNotification(status: RuntimeStatus): Notification {
         val openIntent = Intent(this, MainActivity::class.java)
         val pending = PendingIntent.getActivity(
             this,
@@ -322,8 +328,13 @@ class ProxyForegroundService : Service() {
             openIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val text = if (status.proxyRunning) {
-            "HTTP ${config.httpPort}, SOCKS ${config.socksPort}; health ${if (status.requestOk) "ok" else "checking"}"
+        val listeners = notificationListenerSummary()
+        val text = if (status.proxyRunning && status.portOk && status.requestOk) {
+            "$listeners; health ok"
+        } else if (status.proxyRunning && !status.portOk) {
+            "Proxy running; port check failed"
+        } else if (status.proxyRunning && !status.requestOk) {
+            "Proxy running; request check failed"
         } else {
             "Proxy core stopped; watchdog ${if (status.desiredRunning) "armed" else "idle"}"
         }
@@ -331,9 +342,33 @@ class ProxyForegroundService : Service() {
             .setSmallIcon(R.drawable.ic_stat_proxy)
             .setContentTitle("Pixel Proxy Gateway")
             .setContentText(text)
+            .setOnlyAlertOnce(true)
             .setOngoing(status.desiredRunning)
             .setContentIntent(pending)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setShowWhen(false)
             .build()
+    }
+
+    private fun notificationListenerSummary(): String {
+        val listeners = mutableListOf<String>()
+        if (config.enableHttp) listeners += "HTTP ${config.httpPort}"
+        if (config.enableSocks) listeners += "SOCKS ${config.socksPort}"
+        return listeners.ifEmpty { listOf("No listeners") }.joinToString(", ")
+    }
+
+    private fun notificationSnapshot(status: RuntimeStatus): NotificationSnapshot {
+        return NotificationSnapshot(
+            proxyRunning = status.proxyRunning,
+            desiredRunning = status.desiredRunning,
+            portOk = status.portOk,
+            requestOk = status.requestOk,
+            enableHttp = config.enableHttp,
+            enableSocks = config.enableSocks,
+            httpPort = config.httpPort,
+            socksPort = config.socksPort,
+        )
     }
 
     override fun dump(fd: FileDescriptor?, writer: PrintWriter, args: Array<out String>?) {
@@ -354,7 +389,7 @@ class ProxyForegroundService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "proxy_gateway"
+        private const val CHANNEL_ID = "proxy_gateway_status"
         private const val NOTIFICATION_ID = 1001
         private val WAKE_LOCK_TIMEOUT_MS = TimeUnit.MINUTES.toMillis(10)
 
@@ -362,4 +397,15 @@ class ProxyForegroundService : Service() {
             return Intent(context, ProxyForegroundService::class.java).setAction(action)
         }
     }
+
+    private data class NotificationSnapshot(
+        val proxyRunning: Boolean,
+        val desiredRunning: Boolean,
+        val portOk: Boolean,
+        val requestOk: Boolean,
+        val enableHttp: Boolean,
+        val enableSocks: Boolean,
+        val httpPort: Int,
+        val socksPort: Int,
+    )
 }
