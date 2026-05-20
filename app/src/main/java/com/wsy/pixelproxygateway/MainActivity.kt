@@ -18,7 +18,9 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -55,15 +57,20 @@ class MainActivity : Activity() {
     private lateinit var receivedTrafficText: TextView
     private lateinit var statusText: TextView
     private lateinit var logText: TextView
+    private lateinit var scrollView: ScrollView
     private var firstTrafficSample: TrafficSample? = null
     private var previousTrafficSample: TrafficSample? = null
     private var maxTxBps: Long = 0
     private var maxRxBps: Long = 0
+    private var userScrolling = false
+    private val markScrollIdle = Runnable { userScrolling = false }
 
     private val handler = Handler(Looper.getMainLooper())
     private val refresher = object : Runnable {
         override fun run() {
-            refreshStatus()
+            if (!userScrolling) {
+                refreshStatus(updateDetails = false, preserveScroll = true)
+            }
             handler.postDelayed(this, 3000)
         }
     }
@@ -76,7 +83,7 @@ class MainActivity : Activity() {
         requestNotificationPermission()
         buildUi()
         loadConfig(settingsStore.load())
-        refreshStatus()
+        refreshStatus(updateDetails = true, preserveScroll = false)
     }
 
     override fun onResume() {
@@ -92,9 +99,9 @@ class MainActivity : Activity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(16))
             setBackgroundColor(COLOR_SCREEN)
         }
+        applySystemBarPadding(root)
 
         statusPill = pill("Stopped", COLOR_MUTED_BG, COLOR_MUTED_TEXT)
         statusSummary = bodyText(monospace = false).apply {
@@ -117,7 +124,6 @@ class MainActivity : Activity() {
 
         endpointText = bodyText(monospace = false).apply {
             textSize = 14f
-            setTextIsSelectable(true)
         }
         root.addView(card().apply {
             addView(section("Proxy endpoints", topPaddingDp = 0))
@@ -140,8 +146,11 @@ class MainActivity : Activity() {
             ))
             addView(row(
                 button("Restart") { send(Actions.RESTART) },
-                button("Battery") { openBatterySettings() },
+                button("Health") { checkHealthNow() },
                 button("Copy") { copyStatus() },
+            ))
+            addView(row(
+                button("Battery") { openBatterySettings() },
             ))
         })
 
@@ -196,10 +205,26 @@ class MainActivity : Activity() {
 
         authEnabled.setOnCheckedChangeListener { _, _ -> updateAuthFields() }
 
-        setContentView(ScrollView(this).apply {
+        scrollView = ScrollView(this).apply {
             setBackgroundColor(COLOR_SCREEN)
             addView(root)
-        })
+            setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN,
+                    MotionEvent.ACTION_MOVE -> {
+                        userScrolling = true
+                        handler.removeCallbacks(markScrollIdle)
+                    }
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> {
+                        handler.removeCallbacks(markScrollIdle)
+                        handler.postDelayed(markScrollIdle, SCROLL_IDLE_DELAY_MS)
+                    }
+                }
+                false
+            }
+        }
+        setContentView(scrollView)
     }
 
     private fun listenerCheck(isHttp: Boolean): View {
@@ -329,16 +354,73 @@ class MainActivity : Activity() {
             .putExtra(Actions.EXTRA_START_ON_BOOT, config.startOnBoot)
         val started = ServiceLauncher.startForeground(this, intent, "ui:${action.substringAfterLast('.')}")
         toast(if (started) successMessage else "service launch failed")
-        refreshStatus()
+        refreshStatus(updateDetails = true, preserveScroll = true)
     }
 
-    private fun refreshStatus() {
+    private fun refreshStatus(updateDetails: Boolean, preserveScroll: Boolean) {
+        val scrollY = if (preserveScroll && ::scrollView.isInitialized) scrollView.scrollY else 0
         val status = statusStore.loadFromDisk()
         updateStatusSummary(status)
         updateEndpoints(status)
         updateTraffic()
-        statusText.text = status.toText()
-        logText.text = logStore.tailAll(90).ifBlank { "No logs yet." }
+        if (updateDetails) {
+            statusText.text = status.toText()
+            logText.text = logStore.tailAll(90).ifBlank { "No logs yet." }
+        }
+        if (preserveScroll && ::scrollView.isInitialized) restoreScroll(scrollY)
+    }
+
+    private fun restoreScroll(scrollY: Int) {
+        scrollView.post {
+            scrollView.scrollTo(0, scrollY)
+            scrollView.post { scrollView.scrollTo(0, scrollY) }
+        }
+    }
+
+    private fun checkHealthNow() {
+        val config = readConfig()
+        val error = config.startValidationError()
+        if (error != null) {
+            toast(error)
+            return
+        }
+        settingsStore.save(config)
+        toast("Checking health")
+        Thread({
+            val portResult = HealthWatchdogs.checkPorts(config, config.timeoutSeconds * 1000)
+            val requestResult = HealthWatchdogs.checkRequest(config)
+            val now = TimeUtil.now()
+            val lastError = when {
+                !portResult.first -> portResult.second
+                !requestResult.ok -> requestResult.error
+                else -> ""
+            }
+            statusStore.update {
+                it.copy(
+                    bindAddress = config.bindAddress,
+                    httpPort = config.httpPort,
+                    socksPort = config.socksPort,
+                    enableHttp = config.enableHttp,
+                    enableSocks = config.enableSocks,
+                    startOnBoot = config.startOnBoot,
+                    portOk = portResult.first,
+                    lastPortCheckAt = now,
+                    requestOk = requestResult.ok,
+                    lastRequestCheckAt = now,
+                    lastHttpStatus = requestResult.status,
+                    consecutiveFailures = if (requestResult.ok) 0 else it.consecutiveFailures,
+                    lastError = lastError,
+                )
+            }
+            logStore.append(
+                "app",
+                "manual health check port=${portResult.first} request=${requestResult.ok} status=${requestResult.status} error=$lastError",
+            )
+            runOnUiThread {
+                refreshStatus(updateDetails = true, preserveScroll = true)
+                toast(if (portResult.first && requestResult.ok) "Health ok" else "Health failed")
+            }
+        }, "manual-health-check").start()
     }
 
     private fun updateStatusSummary(status: RuntimeStatus) {
@@ -527,11 +609,11 @@ class MainActivity : Activity() {
         setPadding(0, dp(topPaddingDp), 0, dp(8))
     }
 
-    private fun bodyText(monospace: Boolean = true): TextView = TextView(this).apply {
+    private fun bodyText(monospace: Boolean = true, selectable: Boolean = false): TextView = TextView(this).apply {
         textSize = 12f
         setTextColor(COLOR_TEXT_SECONDARY)
         typeface = if (monospace) Typeface.MONOSPACE else Typeface.DEFAULT
-        setTextIsSelectable(true)
+        setTextIsSelectable(selectable)
         setLineSpacing(0f, 1.08f)
     }
 
@@ -545,10 +627,13 @@ class MainActivity : Activity() {
         this.hint = hint
         inputType = input
         setSingleLine(true)
+        minHeight = dp(56)
+        gravity = Gravity.CENTER_VERTICAL
         textSize = 14f
         setTextColor(COLOR_TEXT)
         setHintTextColor(COLOR_HINT)
-        setPadding(dp(10), 0, dp(10), 0)
+        includeFontPadding = true
+        setPadding(dp(10), dp(4), dp(10), dp(8))
     }
 
     private fun check(text: String): CheckBox = CheckBox(this).apply {
@@ -591,6 +676,28 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun applySystemBarPadding(view: View) {
+        val horizontal = dp(16)
+        val vertical = dp(16)
+        view.setPadding(horizontal, vertical, horizontal, vertical)
+        view.setOnApplyWindowInsetsListener { target, insets ->
+            if (Build.VERSION.SDK_INT >= 30) {
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                target.setPadding(horizontal, vertical + bars.top, horizontal, vertical + bars.bottom)
+            } else {
+                @Suppress("DEPRECATION")
+                target.setPadding(
+                    horizontal,
+                    vertical + insets.systemWindowInsetTop,
+                    horizontal,
+                    vertical + insets.systemWindowInsetBottom,
+                )
+            }
+            insets
+        }
+        view.requestApplyInsets()
+    }
+
     private fun pill(text: String, backgroundColor: Int, textColor: Int): TextView = TextView(this).apply {
         this.text = text
         textSize = 12f
@@ -618,6 +725,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val MAX_ENDPOINT_LINES = 8
+        private const val SCROLL_IDLE_DELAY_MS = 1200L
         private const val COLOR_SCREEN = 0xFFF6F7F9.toInt()
         private const val COLOR_TEXT = 0xFF172033.toInt()
         private const val COLOR_TEXT_SECONDARY = 0xFF526070.toInt()
