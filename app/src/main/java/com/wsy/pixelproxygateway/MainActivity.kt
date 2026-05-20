@@ -17,8 +17,8 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.text.TextUtils
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
@@ -62,15 +62,11 @@ class MainActivity : Activity() {
     private var previousTrafficSample: TrafficSample? = null
     private var maxTxBps: Long = 0
     private var maxRxBps: Long = 0
-    private var userScrolling = false
-    private val markScrollIdle = Runnable { userScrolling = false }
 
     private val handler = Handler(Looper.getMainLooper())
     private val refresher = object : Runnable {
         override fun run() {
-            if (!userScrolling) {
-                refreshStatus(updateDetails = false, preserveScroll = true)
-            }
+            refreshStatus(updateDetails = false)
             handler.postDelayed(this, 3000)
         }
     }
@@ -83,7 +79,7 @@ class MainActivity : Activity() {
         requestNotificationPermission()
         buildUi()
         loadConfig(settingsStore.load())
-        refreshStatus(updateDetails = true, preserveScroll = false)
+        refreshStatus(updateDetails = true)
     }
 
     override fun onResume() {
@@ -108,6 +104,7 @@ class MainActivity : Activity() {
             textSize = 14f
             setTextColor(COLOR_TEXT_SECONDARY)
             setPadding(0, dp(10), 0, 0)
+            lockLines(STATUS_SUMMARY_LINES)
         }
         root.addView(card().apply {
             addView(LinearLayout(this@MainActivity).apply {
@@ -124,6 +121,7 @@ class MainActivity : Activity() {
 
         endpointText = bodyText(monospace = false).apply {
             textSize = 14f
+            lockLines(ENDPOINT_LINES)
         }
         root.addView(card().apply {
             addView(section("Proxy endpoints", topPaddingDp = 0))
@@ -208,21 +206,6 @@ class MainActivity : Activity() {
         scrollView = ScrollView(this).apply {
             setBackgroundColor(COLOR_SCREEN)
             addView(root)
-            setOnTouchListener { _, event ->
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN,
-                    MotionEvent.ACTION_MOVE -> {
-                        userScrolling = true
-                        handler.removeCallbacks(markScrollIdle)
-                    }
-                    MotionEvent.ACTION_UP,
-                    MotionEvent.ACTION_CANCEL -> {
-                        handler.removeCallbacks(markScrollIdle)
-                        handler.postDelayed(markScrollIdle, SCROLL_IDLE_DELAY_MS)
-                    }
-                }
-                false
-            }
         }
         setContentView(scrollView)
     }
@@ -354,26 +337,21 @@ class MainActivity : Activity() {
             .putExtra(Actions.EXTRA_START_ON_BOOT, config.startOnBoot)
         val started = ServiceLauncher.startForeground(this, intent, "ui:${action.substringAfterLast('.')}")
         toast(if (started) successMessage else "service launch failed")
-        refreshStatus(updateDetails = true, preserveScroll = true)
+        refreshStatus(updateDetails = true)
     }
 
-    private fun refreshStatus(updateDetails: Boolean, preserveScroll: Boolean) {
-        val scrollY = if (preserveScroll && ::scrollView.isInitialized) scrollView.scrollY else 0
+    private fun refreshStatus(updateDetails: Boolean) {
         val status = statusStore.loadFromDisk()
         updateStatusSummary(status)
         updateEndpoints(status)
         updateTraffic()
         if (updateDetails) {
+            val scrollY = if (::scrollView.isInitialized) scrollView.scrollY else 0
             statusText.text = status.toText()
             logText.text = logStore.tailAll(90).ifBlank { "No logs yet." }
-        }
-        if (preserveScroll && ::scrollView.isInitialized) restoreScroll(scrollY)
-    }
-
-    private fun restoreScroll(scrollY: Int) {
-        scrollView.post {
-            scrollView.scrollTo(0, scrollY)
-            scrollView.post { scrollView.scrollTo(0, scrollY) }
+            if (::scrollView.isInitialized) {
+                scrollView.post { scrollView.scrollTo(0, scrollY) }
+            }
         }
     }
 
@@ -417,7 +395,7 @@ class MainActivity : Activity() {
                 "manual health check port=${portResult.first} request=${requestResult.ok} status=${requestResult.status} error=$lastError",
             )
             runOnUiThread {
-                refreshStatus(updateDetails = true, preserveScroll = true)
+                refreshStatus(updateDetails = true)
                 toast(if (portResult.first && requestResult.ok) "Health ok" else "Health failed")
             }
         }, "manual-health-check").start()
@@ -448,7 +426,7 @@ class MainActivity : Activity() {
         val listenerText = if (listeners.isEmpty()) "No listener enabled" else listeners.joinToString("  ")
         val health = "Port ${okFail(status.portOk)}  Health ${if (status.requestOk) status.lastHttpStatus else "fail"}"
         val lastChange = status.lastStartAt.ifBlank { status.lastStopAt.ifBlank { "No start recorded" } }
-        statusSummary.text = "$listenerText\n$health  Restarts ${status.restartCount}\nLast change $lastChange"
+        statusSummary.text = "$listenerText\n$health  Restarts ${status.restartCount}\nLast ${compactTimestamp(lastChange)}"
     }
 
     private fun updateEndpoints(status: RuntimeStatus) {
@@ -458,7 +436,12 @@ class MainActivity : Activity() {
             if (status.enableHttp) lines.add("HTTP   $address:${status.httpPort}")
             if (status.enableSocks) lines.add("SOCKS5 $address:${status.socksPort}")
         }
-        endpointText.text = lines.take(MAX_ENDPOINT_LINES).joinToString("\n").ifBlank { "No IPv4 endpoint available" }
+        val displayLines = when {
+            lines.isEmpty() -> listOf("No IPv4 endpoint available")
+            lines.size <= ENDPOINT_LINES -> lines
+            else -> lines.take(ENDPOINT_LINES - 1) + "+${lines.size - ENDPOINT_LINES + 1} more"
+        }
+        endpointText.text = displayLines.joinToString("\n")
     }
 
     private fun endpointAddresses(bindAddress: String): List<String> {
@@ -525,6 +508,11 @@ class MainActivity : Activity() {
 
     private fun buildTrafficText(label: String, currentBps: Long, maxBps: Long, totalBytes: Long): String {
         return "$label\nCurrent: ${formatBitRate(currentBps)}\nMax: ${formatBitRate(maxBps)}\nTotal: ${formatBytes(totalBytes)}"
+    }
+
+    private fun compactTimestamp(value: String): String {
+        if (value == "No start recorded") return value
+        return value.replace('T', ' ').substringBefore("+").take(16).ifBlank { value }
     }
 
     private fun formatBitRate(bytesPerSecond: Long): String {
@@ -618,9 +606,10 @@ class MainActivity : Activity() {
     }
 
     private fun metricText(): TextView = bodyText(monospace = false).apply {
-        textSize = 14f
+        textSize = 13f
         setTextColor(COLOR_TEXT)
         setTextIsSelectable(false)
+        lockLines(TRAFFIC_METRIC_LINES)
     }
 
     private fun field(hint: String, input: Int): EditText = EditText(this).apply {
@@ -676,6 +665,14 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun TextView.lockLines(count: Int) {
+        minLines = count
+        maxLines = count
+        setLines(count)
+        ellipsize = TextUtils.TruncateAt.END
+        includeFontPadding = true
+    }
+
     private fun applySystemBarPadding(view: View) {
         val horizontal = dp(16)
         val vertical = dp(16)
@@ -724,8 +721,9 @@ class MainActivity : Activity() {
     private fun okFail(value: Boolean): String = if (value) "ok" else "fail"
 
     companion object {
-        private const val MAX_ENDPOINT_LINES = 8
-        private const val SCROLL_IDLE_DELAY_MS = 1200L
+        private const val STATUS_SUMMARY_LINES = 3
+        private const val ENDPOINT_LINES = 4
+        private const val TRAFFIC_METRIC_LINES = 4
         private const val COLOR_SCREEN = 0xFFF6F7F9.toInt()
         private const val COLOR_TEXT = 0xFF172033.toInt()
         private const val COLOR_TEXT_SECONDARY = 0xFF526070.toInt()
