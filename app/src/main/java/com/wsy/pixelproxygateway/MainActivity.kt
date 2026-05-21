@@ -145,14 +145,12 @@ class MainActivity : Activity() {
             addView(row(
                 button("Restart") { send(Actions.RESTART) },
                 button("Health") { checkHealthNow() },
-                button("Copy") { copyStatus() },
-            ))
-            addView(row(
-                button("Copy logs") { copyLogs() },
-                button("Copy endpoints") { copyEndpoints() },
+                button("Copy status") { copyStatus() },
             ))
             addView(row(
                 button("Battery") { openBatterySettings() },
+                button("Copy logs") { copyLogs() },
+                button("Copy endpoints") { copyEndpoints() },
             ))
         })
 
@@ -570,7 +568,7 @@ class MainActivity : Activity() {
     }
 
     private fun copyStatus() {
-        val text = statusStore.loadFromDisk().toText() + "\n" + logStore.tailAll(120)
+        val text = statusStore.loadFromDisk().toText()
         copyToClipboard("Pixel Proxy Gateway status", text, "Status copied")
     }
 
