@@ -112,6 +112,9 @@ class ProxyForegroundService : Service() {
                 }
                 runManualHealthCheck(config)
             }
+            Actions.REPOST_NOTIFICATION -> {
+                updateNotification(force = true)
+            }
             Actions.APPLY_CONFIG -> {
                 config = updated.copy(autoStart = config.autoStart).sanitized()
                 settingsStore.save(config)
@@ -350,10 +353,10 @@ class ProxyForegroundService : Service() {
         }
     }
 
-    private fun updateNotification() {
+    private fun updateNotification(force: Boolean = false) {
         val status = statusStore.current()
         val snapshot = notificationSnapshot(status)
-        if (snapshot == lastNotificationSnapshot) return
+        if (!force && snapshot == lastNotificationSnapshot) return
         lastNotificationSnapshot = snapshot
         notificationManager.notify(NOTIFICATION_ID, buildNotification(status))
     }
@@ -366,6 +369,12 @@ class ProxyForegroundService : Service() {
             openIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val deletePending = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, ProxyForegroundService::class.java).setAction(Actions.REPOST_NOTIFICATION),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val listeners = notificationListenerSummary()
         val text = if (status.proxyRunning && status.portOk && status.requestOk) {
             "$listeners; health ok"
@@ -376,18 +385,24 @@ class ProxyForegroundService : Service() {
         } else {
             "Proxy core stopped; watchdog ${if (status.desiredRunning) "armed" else "idle"}"
         }
-        return Notification.Builder(this, CHANNEL_ID)
+        val keepNotification = shouldKeepNotification(status)
+        val notification = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_proxy)
             .setContentTitle("Pixel Proxy Gateway")
             .setContentText(text)
             .setOnlyAlertOnce(true)
-            .setOngoing(shouldKeepNotification(status))
+            .setOngoing(keepNotification)
             .setAutoCancel(false)
             .setContentIntent(pending)
+            .setDeleteIntent(deletePending)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setShowWhen(false)
             .build()
+        if (keepNotification) {
+            notification.flags = notification.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
+        }
+        return notification
     }
 
     private fun notificationListenerSummary(): String {

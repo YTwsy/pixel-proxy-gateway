@@ -6,6 +6,7 @@ object Actions {
     const val RESTART = "com.wsy.pixelproxygateway.action.RESTART"
     const val APPLY_CONFIG = "com.wsy.pixelproxygateway.action.APPLY_CONFIG"
     const val CHECK_HEALTH = "com.wsy.pixelproxygateway.action.CHECK_HEALTH"
+    const val REPOST_NOTIFICATION = "com.wsy.pixelproxygateway.action.REPOST_NOTIFICATION"
 
     const val EXTRA_BIND_ADDRESS = "bind_address"
     const val EXTRA_HTTP_PORT = "http_port"

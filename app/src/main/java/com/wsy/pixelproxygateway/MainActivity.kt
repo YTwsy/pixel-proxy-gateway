@@ -148,6 +148,10 @@ class MainActivity : Activity() {
                 button("Copy") { copyStatus() },
             ))
             addView(row(
+                button("Copy logs") { copyLogs() },
+                button("Copy endpoints") { copyEndpoints() },
+            ))
+            addView(row(
                 button("Battery") { openBatterySettings() },
             ))
         })
@@ -421,18 +425,23 @@ class MainActivity : Activity() {
     }
 
     private fun updateEndpoints(status: RuntimeStatus) {
-        val addresses = endpointAddresses(status.bindAddress)
-        val lines = mutableListOf<String>()
-        addresses.forEach { address ->
-            if (status.enableHttp) lines.add("HTTP   $address:${status.httpPort}")
-            if (status.enableSocks) lines.add("SOCKS5 $address:${status.socksPort}")
-        }
+        val lines = endpointLines(status)
         val displayLines = when {
             lines.isEmpty() -> listOf("No IPv4 endpoint available")
             lines.size <= ENDPOINT_LINES -> lines
             else -> lines.take(ENDPOINT_LINES - 1) + "+${lines.size - ENDPOINT_LINES + 1} more"
         }
         endpointText.text = displayLines.joinToString("\n")
+    }
+
+    private fun endpointLines(status: RuntimeStatus): List<String> {
+        val addresses = endpointAddresses(status.bindAddress)
+        val lines = mutableListOf<String>()
+        addresses.forEach { address ->
+            if (status.enableHttp) lines.add("HTTP   $address:${status.httpPort}")
+            if (status.enableSocks) lines.add("SOCKS5 $address:${status.socksPort}")
+        }
+        return lines
     }
 
     private fun endpointAddresses(bindAddress: String): List<String> {
@@ -562,9 +571,24 @@ class MainActivity : Activity() {
 
     private fun copyStatus() {
         val text = statusStore.loadFromDisk().toText() + "\n" + logStore.tailAll(120)
+        copyToClipboard("Pixel Proxy Gateway status", text, "Status copied")
+    }
+
+    private fun copyLogs() {
+        val text = logStore.tailAll(200).ifBlank { "No logs yet." }
+        copyToClipboard("Pixel Proxy Gateway logs", text, "Logs copied")
+    }
+
+    private fun copyEndpoints() {
+        val lines = endpointLines(statusStore.loadFromDisk())
+        val text = lines.ifEmpty { listOf("No IPv4 endpoint available") }.joinToString("\n")
+        copyToClipboard("Pixel Proxy Gateway endpoints", text, "Proxy endpoints copied")
+    }
+
+    private fun copyToClipboard(label: String, text: String, message: String) {
         val clipboard = getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText("Pixel Proxy Gateway status", text))
-        toast("Status copied")
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        toast(message)
     }
 
     private fun requestNotificationPermission() {
