@@ -381,7 +381,8 @@ class ProxyForegroundService : Service() {
             .setContentTitle("Pixel Proxy Gateway")
             .setContentText(text)
             .setOnlyAlertOnce(true)
-            .setOngoing(status.desiredRunning)
+            .setOngoing(shouldKeepNotification(status))
+            .setAutoCancel(false)
             .setContentIntent(pending)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
@@ -399,6 +400,7 @@ class ProxyForegroundService : Service() {
     private fun notificationSnapshot(status: RuntimeStatus): NotificationSnapshot {
         return NotificationSnapshot(
             proxyRunning = status.proxyRunning,
+            serviceRunning = status.serviceRunning,
             desiredRunning = status.desiredRunning,
             portOk = status.portOk,
             requestOk = status.requestOk,
@@ -407,6 +409,10 @@ class ProxyForegroundService : Service() {
             httpPort = config.httpPort,
             socksPort = config.socksPort,
         )
+    }
+
+    private fun shouldKeepNotification(status: RuntimeStatus): Boolean {
+        return status.serviceRunning || status.desiredRunning || status.proxyRunning
     }
 
     override fun dump(fd: FileDescriptor?, writer: PrintWriter, args: Array<out String>?) {
@@ -438,6 +444,7 @@ class ProxyForegroundService : Service() {
 
     private data class NotificationSnapshot(
         val proxyRunning: Boolean,
+        val serviceRunning: Boolean,
         val desiredRunning: Boolean,
         val portOk: Boolean,
         val requestOk: Boolean,
