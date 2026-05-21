@@ -93,6 +93,25 @@ class ProxyForegroundService : Service() {
                 acquireWakeLock()
                 manager.restart(config, "adb_or_ui_restart")
             }
+            Actions.CHECK_HEALTH -> {
+                config = config.withHealthSettingsFrom(updated)
+                settingsStore.save(config)
+                statusStore.update {
+                    it.copy(
+                        serviceRunning = true,
+                        bindAddress = config.bindAddress,
+                        httpPort = config.httpPort,
+                        socksPort = config.socksPort,
+                        enableHttp = config.enableHttp,
+                        enableSocks = config.enableSocks,
+                        startOnBoot = config.startOnBoot,
+                        autoStart = config.autoStart,
+                        wakeLockHeld = wakeLock?.isHeld == true,
+                        batteryIgnoringOptimizations = isIgnoringBatteryOptimizations(),
+                    )
+                }
+                runManualHealthCheck(config)
+            }
             Actions.APPLY_CONFIG -> {
                 config = updated.copy(autoStart = config.autoStart).sanitized()
                 settingsStore.save(config)
@@ -199,6 +218,25 @@ class ProxyForegroundService : Service() {
         }
         logStore.append("app", "proxy stop requested reason=$reason")
         updateNotification()
+    }
+
+    private fun runManualHealthCheck(healthConfig: ProxyConfig) {
+        scheduler.execute {
+            runCatching {
+                val result = HealthWatchdogs.checkAll(healthConfig)
+                val checkedAt = TimeUtil.now()
+                statusStore.update {
+                    HealthStatus.applyManualCheck(it, healthConfig, result, checkedAt).copy(
+                        wakeLockHeld = wakeLock?.isHeld == true,
+                        batteryIgnoringOptimizations = isIgnoringBatteryOptimizations(),
+                    )
+                }
+                logStore.append("app", HealthStatus.logLine(result))
+                updateNotification()
+            }.getOrElse {
+                logStore.append("app", "manual health check error=${it.message}")
+            }
+        }
     }
 
     private fun startWatchdogs() {
@@ -408,4 +446,15 @@ class ProxyForegroundService : Service() {
         val httpPort: Int,
         val socksPort: Int,
     )
+}
+
+private fun ProxyConfig.withHealthSettingsFrom(requested: ProxyConfig): ProxyConfig {
+    return copy(
+        healthUrl = requested.healthUrl,
+        expectedStatus = requested.expectedStatus,
+        intervalSeconds = requested.intervalSeconds,
+        timeoutSeconds = requested.timeoutSeconds,
+        failureThreshold = requested.failureThreshold,
+        startOnBoot = requested.startOnBoot,
+    ).sanitized()
 }

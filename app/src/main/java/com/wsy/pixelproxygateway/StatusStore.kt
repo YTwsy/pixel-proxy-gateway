@@ -13,6 +13,7 @@ class StatusStore(context: Context) {
     @Synchronized
     fun update(transform: (RuntimeStatus) -> RuntimeStatus): RuntimeStatus {
         val nowMillis = System.currentTimeMillis()
+        status = readStatusFromDisk() ?: status
         val next = transform(status).copy(
             statusUpdatedAt = TimeUtil.format(nowMillis),
             statusUpdatedAtEpochMillis = nowMillis,
@@ -26,8 +27,14 @@ class StatusStore(context: Context) {
 
     @Synchronized
     fun loadFromDisk(): RuntimeStatus {
-        if (!file.exists()) return status
-        val next = runCatching {
+        val next = readStatusFromDisk() ?: status
+        status = next
+        return next
+    }
+
+    private fun readStatusFromDisk(): RuntimeStatus? {
+        if (!file.exists()) return null
+        return runCatching {
             val json = JSONObject(file.readText())
             RuntimeStatus(
                 statusUpdatedAt = json.optString("statusUpdatedAt", ""),
@@ -66,9 +73,7 @@ class StatusStore(context: Context) {
                 batteryIgnoringOptimizations = json.optBoolean("batteryIgnoringOptimizations", false),
                 appVersion = json.optString("appVersion", "0.1.0"),
             )
-        }.getOrElse { status }
-        status = next
-        return next
+        }.getOrNull()
     }
 
     private fun writeStatus(next: RuntimeStatus) {

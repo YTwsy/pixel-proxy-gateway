@@ -318,7 +318,7 @@ class MainActivity : Activity() {
         launchService(action, config, action.substringAfterLast('.').lowercase())
     }
 
-    private fun launchService(action: String, config: ProxyConfig, successMessage: String) {
+    private fun launchService(action: String, config: ProxyConfig, successMessage: String): Boolean {
         val intent = Intent(this, ProxyForegroundService::class.java)
             .setAction(action)
             .putExtra(Actions.EXTRA_BIND_ADDRESS, config.bindAddress)
@@ -338,6 +338,7 @@ class MainActivity : Activity() {
         val started = ServiceLauncher.startForeground(this, intent, "ui:${action.substringAfterLast('.')}")
         toast(if (started) successMessage else "service launch failed")
         refreshStatus(updateDetails = true)
+        return started
     }
 
     private fun refreshStatus(updateDetails: Boolean) {
@@ -362,41 +363,31 @@ class MainActivity : Activity() {
             toast(error)
             return
         }
+        val status = statusStore.loadFromDisk()
+        if (status.serviceRunning || status.desiredRunning || status.proxyRunning) {
+            val started = launchService(Actions.CHECK_HEALTH, config, "Checking health")
+            if (started) {
+                handler.postDelayed({ refreshStatus(updateDetails = true) }, 1_000)
+                handler.postDelayed({ refreshStatus(updateDetails = true) }, 3_000)
+            }
+            return
+        }
         settingsStore.save(config)
+        runLocalHealthCheck(config)
+    }
+
+    private fun runLocalHealthCheck(config: ProxyConfig) {
         toast("Checking health")
         Thread({
-            val portResult = HealthWatchdogs.checkPorts(config, config.timeoutSeconds * 1000)
-            val requestResult = HealthWatchdogs.checkRequest(config)
-            val now = TimeUtil.now()
-            val lastError = when {
-                !portResult.first -> portResult.second
-                !requestResult.ok -> requestResult.error
-                else -> ""
-            }
+            val result = HealthWatchdogs.checkAll(config)
+            val checkedAt = TimeUtil.now()
             statusStore.update {
-                it.copy(
-                    bindAddress = config.bindAddress,
-                    httpPort = config.httpPort,
-                    socksPort = config.socksPort,
-                    enableHttp = config.enableHttp,
-                    enableSocks = config.enableSocks,
-                    startOnBoot = config.startOnBoot,
-                    portOk = portResult.first,
-                    lastPortCheckAt = now,
-                    requestOk = requestResult.ok,
-                    lastRequestCheckAt = now,
-                    lastHttpStatus = requestResult.status,
-                    consecutiveFailures = if (requestResult.ok) 0 else it.consecutiveFailures,
-                    lastError = lastError,
-                )
+                HealthStatus.applyManualCheck(it, config, result, checkedAt)
             }
-            logStore.append(
-                "app",
-                "manual health check port=${portResult.first} request=${requestResult.ok} status=${requestResult.status} error=$lastError",
-            )
+            logStore.append("app", HealthStatus.logLine(result))
             runOnUiThread {
                 refreshStatus(updateDetails = true)
-                toast(if (portResult.first && requestResult.ok) "Health ok" else "Health failed")
+                toast(if (result.ok) "Health ok" else "Health failed")
             }
         }, "manual-health-check").start()
     }

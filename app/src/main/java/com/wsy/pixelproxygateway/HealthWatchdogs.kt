@@ -11,6 +11,18 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 
 object HealthWatchdogs {
+    fun checkAll(config: ProxyConfig): HealthCheckResult {
+        val portResult = checkPorts(config, config.timeoutSeconds * 1000)
+        val requestResult = checkRequest(config)
+        return HealthCheckResult(
+            portOk = portResult.first,
+            portMessage = portResult.second,
+            requestOk = requestResult.ok,
+            requestStatus = requestResult.status,
+            requestError = requestResult.error,
+        )
+    }
+
     fun checkPorts(config: ProxyConfig, timeoutMs: Int): Pair<Boolean, String> {
         val targets = mutableListOf<Int>()
         if (config.enableHttp) targets += config.httpPort
@@ -105,3 +117,19 @@ data class RequestResult(
     val status: Int,
     val error: String,
 )
+
+data class HealthCheckResult(
+    val portOk: Boolean,
+    val portMessage: String,
+    val requestOk: Boolean,
+    val requestStatus: Int,
+    val requestError: String,
+) {
+    val ok: Boolean get() = portOk && requestOk
+    val lastError: String
+        get() = when {
+            !portOk -> portMessage
+            !requestOk -> requestError
+            else -> ""
+        }
+}

@@ -37,6 +37,7 @@
                 <action android:name="com.wsy.pixelproxygateway.action.STOP" />
                 <action android:name="com.wsy.pixelproxygateway.action.RESTART" />
                 <action android:name="com.wsy.pixelproxygateway.action.APPLY_CONFIG" />
+                <action android:name="com.wsy.pixelproxygateway.action.CHECK_HEALTH" />
             </intent-filter>
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -53,6 +54,7 @@
                 <action android:name="com.wsy.pixelproxygateway.action.STOP" />
                 <action android:name="com.wsy.pixelproxygateway.action.RESTART" />
                 <action android:name="com.wsy.pixelproxygateway.action.APPLY_CONFIG" />
+                <action android:name="com.wsy.pixelproxygateway.action.CHECK_HEALTH" />
             </intent-filter>
         </receiver>
 

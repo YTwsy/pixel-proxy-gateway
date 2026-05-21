@@ -11,7 +11,8 @@ class ControlReceiver : BroadcastReceiver() {
             action != Actions.START &&
             action != Actions.STOP &&
             action != Actions.RESTART &&
-            action != Actions.APPLY_CONFIG
+            action != Actions.APPLY_CONFIG &&
+            action != Actions.CHECK_HEALTH
         ) return
         val serviceIntent = Intent(context, ProxyForegroundService::class.java).setAction(action)
         intent?.extras?.let { serviceIntent.putExtras(it) }
