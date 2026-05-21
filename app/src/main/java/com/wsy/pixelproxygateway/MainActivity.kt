@@ -18,6 +18,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
 import android.text.TextUtils
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
@@ -649,7 +650,16 @@ class MainActivity : Activity() {
         textSize = 14f
         setTextColor(Color.WHITE)
         setAllCaps(false)
+        setSingleLine(true)
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+        includeFontPadding = false
+        gravity = Gravity.CENTER
+        setMinWidth(0)
+        setMinimumWidth(0)
+        setAutoSizeTextTypeUniformWithConfiguration(10, 14, 1, TypedValue.COMPLEX_UNIT_SP)
         minimumHeight = dp(42)
+        setPadding(dp(6), 0, dp(6), 0)
         background = rounded(COLOR_PRIMARY, dp(8))
         setOnClickListener(action)
     }
