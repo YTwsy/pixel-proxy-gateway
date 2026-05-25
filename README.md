@@ -1,18 +1,59 @@
 # Pixel Proxy Gateway
 
-Single sideloaded Android app for turning a Pixel running Google VPN into a supervised LAN HTTP/SOCKS proxy endpoint.
+**English** | [中文](README.zh-CN.md)
 
-The app intentionally does not implement Android `VpnService`; Google VPN keeps the VPN slot. Pixel Proxy Gateway is a normal Android app that listens on proxy ports and makes outbound connections from the Pixel app process.
+## Overview
+
+Pixel Proxy Gateway is a single sideloaded Android app for turning an Android phone running a VPN, such as the built-in Google VPN on Pixel devices or Clash Meta, into a supervised LAN HTTP/SOCKS proxy endpoint.
+
+The app intentionally does not implement Android `VpnService`; the phone-side VPN keeps the system VPN slot. Pixel Proxy Gateway runs as a normal Android app: it listens on proxy ports and makes outbound connections from the app process on the phone.
+
+## Why This Project
+
+- **GOST-powered:** the proxy engine is a pinned, source-built GOST binary packaged with the APK and verified before launch.
+- **Built for long-running stability:** the app includes a foreground service, wake lock, process supervisor, port watchdog, request watchdog, rotating logs, boot/upgrade restore, and ADB diagnostics.
+- **Stable Every Proxy alternative:** for always-on LAN proxy gateway use, it is designed to be more stable and diagnosable than lightweight proxy-sharing apps such as Every Proxy, while remaining open-source, free, and ad-free.
+- **Operationally visible:** status, logs, health checks, listener state, and recovery behavior are exposed for troubleshooting instead of being hidden behind a minimal UI.
+
+## Classic Use Case
+
+A common topology is to use the Android phone as the upstream VPN egress. Other devices can point directly to the phone's proxy ports. If split routing is needed, a computer can sit in the middle as the LAN policy router, using `mihomo` rules or PAC.
+
+**Phone A, usually a Pixel or another Android phone:**
+
+- A phone-side VPN is enabled, such as Clash Meta or the built-in Google VPN on supported Pixel devices.
+- Pixel Proxy Gateway opens HTTP and SOCKS ports for LAN access.
+
+**Computer B:**
+
+- `mihomo` runs with `mixed-port` and `allow-lan`.
+- Phone A's Pixel Proxy Gateway endpoint is configured as an outbound proxy, for example `phoneA`.
+- Rules send overseas or selected domains to `phoneA`.
+- Domestic, LAN, and private ranges stay `DIRECT`.
+- A PAC file can also be used when that is a better fit for the client side.
+
+**Other devices:**
+
+- Their proxy or PAC settings can point to Computer B.
+- In simpler setups, they can point directly to Phone A's Pixel Proxy Gateway ports.
+
+On supported Google Pixel devices and account environments, the built-in Google VPN can be used as the phone-side upstream path. Initial activation or re-verification may still need a network path that can complete Google's service verification; mobile data, eSIM, or another already trusted network path is often the least fussy way to complete that first handshake. After that, this project only exposes the phone's app-level proxy endpoint and does not replace or implement the VPN itself.
+
+## Related Use Cases And Search Keywords
+
+Pixel Proxy Gateway is relevant to: Android HTTP proxy, Android SOCKS5 proxy, phone as proxy gateway, Android VPN to LAN proxy, Pixel Google VPN proxy, Clash Meta proxy sharing, GOST Android proxy, Every Proxy alternative, open-source ad-free Android proxy, mihomo upstream proxy, LAN proxy sharing, PAC proxy gateway, phone VPN to LAN proxy, and supervised mobile proxy endpoint.
 
 ## Defaults
 
-- Package: `com.wsy.pixelproxygateway`
-- HTTP: `0.0.0.0:8080`
-- SOCKS5: `0.0.0.0:1080`
-- Authentication: supported, disabled by default
-- Health check: `https://connectivitycheck.gstatic.com/generate_204`
-- GOST tag: `v3.2.6`
-- GOST commit: `340ba32ef0bebc7293908007cc423dd5f33dd88c`
+| Item | Value |
+| --- | --- |
+| Package | `com.wsy.pixelproxygateway` |
+| HTTP | `0.0.0.0:8080` |
+| SOCKS5 | `0.0.0.0:1080` |
+| Authentication | Supported, disabled by default |
+| Health check | `https://connectivitycheck.gstatic.com/generate_204` |
+| GOST tag | `v3.2.6` |
+| GOST commit | `340ba32ef0bebc7293908007cc423dd5f33dd88c` |
 
 ## Stability V1
 
@@ -49,7 +90,9 @@ This requires `go` and network access for the first source checkout. The script 
 - `app/src/main/assets/gost/android-arm64/gost.tag`
 - `app/src/main/assets/gost/android-arm64/gost.commit`
 
-The build script pins both the stable tag and the expected commit. If `v3.2.6` ever resolves to a different commit, the script refuses to build. To verify the current local source checkout, pre-APK binary, and metadata without rebuilding:
+The build script pins both the stable tag and the expected commit. If `v3.2.6` ever resolves to a different commit, the script refuses to build.
+
+Verify the current local source checkout, pre-APK binary, and metadata without rebuilding:
 
 ```sh
 scripts/verify_gost_provenance.sh
@@ -58,6 +101,8 @@ scripts/verify_gost_provenance.sh
 The app executes GOST from Android's `nativeLibraryDir`, not from writable app data. This matters on Android 10+ because target API 29+ apps cannot directly execute files from their writable app home directory. The app verifies `gost.sha256` before starting the native binary.
 
 ## Build APK
+
+Build the debug APK:
 
 ```sh
 ./gradlew :app:assembleDebug
@@ -83,9 +128,11 @@ Run the full host-side preflight bundle before attaching the Pixel:
 scripts/host_preflight.sh
 ```
 
-This writes `reports/host-preflight-*` with shell syntax, status parser self-test, ADB start guard self-test, LAN smoke strict-assertion self-test, Gradle build/lint/unit-test, APK packaging plus stability-critical manifest checks, GOST provenance, ADB device status, and a short device-validation checklist.
+This writes `reports/host-preflight-*` with shell syntax checks, status parser self-test, ADB start guard self-test, LAN smoke strict-assertion self-test, Gradle build/lint/unit-test, APK packaging plus stability-critical manifest checks, GOST provenance, ADB device status, and a short device-validation checklist.
 
-Install:
+## Install And Control
+
+Install and start:
 
 ```sh
 scripts/adb_install_debug.sh
@@ -99,7 +146,7 @@ One-shot device-side verification after connecting the Pixel:
 scripts/adb_verify_device.sh
 ```
 
-End-to-end acceptance check after connecting the Pixel:
+End-to-end acceptance check:
 
 ```sh
 scripts/acceptance_check.sh
@@ -141,7 +188,7 @@ LAN/proxy egress smoke test from the Mac or another LAN client:
 PIXEL_IP=<pixel-lan-ip> scripts/lan_smoke.sh
 ```
 
-To make the egress proof strict when you know the expected Google VPN exit IP:
+Make the egress proof strict when you know the expected Google VPN exit IP:
 
 ```sh
 EXPECTED_PROXY_IP=<google-vpn-exit-ip> PIXEL_IP=<pixel-lan-ip> scripts/lan_smoke.sh
@@ -149,14 +196,14 @@ EXPECTED_PROXY_IP=<google-vpn-exit-ip> PIXEL_IP=<pixel-lan-ip> scripts/lan_smoke
 
 When the Mac is not expected to share the same exit, `REQUIRE_PROXY_DIFF_FROM_DIRECT=true` also fails the smoke test if the proxy public IP equals the direct public IP.
 
-Stop/restart:
+Stop or restart:
 
 ```sh
 scripts/adb_stop.sh
 scripts/adb_restart.sh
 ```
 
-## Real-device validation
+## Real-Device Validation
 
 Google VPN routing and overnight stability must be validated on the Pixel:
 
@@ -175,14 +222,15 @@ If a device-side acceptance step fails, the script automatically writes a diagno
 
 The acceptance flow also reinstalls the APK once to verify `MY_PACKAGE_REPLACED` restore from persisted config. Set `RUN_RESTORE_CHECK=false` to skip that upgrade-restore check. Full device reboot restore is intentionally treated as post-unlock `BOOT_COMPLETED`, because this app stores its configuration in normal credential-protected app storage rather than Direct Boot storage. Run `scripts/adb_reboot_restore_check.sh` when you want to prove that path explicitly.
 
+## Overnight Runs
+
 For a scripted overnight run while the Pixel stays connected to ADB:
 
 ```sh
 DURATION_SECONDS=28800 INTERVAL_SECONDS=300 PIXEL_IP=<pixel-ip> scripts/stability_monitor.sh
 ```
 
-This writes timestamped samples under `reports/` with ADB status, listener state, GOST pid, and optional LAN smoke results.
-The summary includes `statusAgeSeconds`; samples whose status is stale or unreadable are marked with `adb_exit=1`.
+This writes timestamped samples under `reports/` with ADB status, listener state, GOST pid, and optional LAN smoke results. The summary includes `statusAgeSeconds`; samples whose status is stale or unreadable are marked with `adb_exit=1`.
 
 For an ADB-connected overnight run with last-resort recovery if the service stops reporting healthy state:
 
@@ -190,5 +238,4 @@ For an ADB-connected overnight run with last-resort recovery if the service stop
 DURATION_SECONDS=28800 CHECK_INTERVAL_SECONDS=60 PIXEL_IP=<pixel-ip> scripts/adb_supervise.sh
 ```
 
-This app can self-recover from process/port/request failures. `adb_supervise.sh` is deliberately outside the app and should be treated as the last-resort recovery layer for Android service state, background policy, or Google VPN/radio states that the in-app GOST watchdog cannot repair by itself.
-The supervisor also treats stale status older than `STATUS_MAX_AGE_SECONDS` (default `120`) as unhealthy before recovery counting.
+This app can self-recover from process, port, and request failures. `adb_supervise.sh` is deliberately outside the app and should be treated as the last-resort recovery layer for Android service state, background policy, or Google VPN/radio states that the in-app GOST watchdog cannot repair by itself. The supervisor also treats stale status older than `STATUS_MAX_AGE_SECONDS` (default `120`) as unhealthy before recovery counting.
