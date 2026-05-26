@@ -8,12 +8,15 @@ Pixel Proxy Gateway 是一个单 APK、侧载安装的 Android 应用，用来�
 
 本应用有意不实现 Android `VpnService`，这样手机侧 VPN 可以继续占用系统 VPN 槽位。Pixel Proxy Gateway 作为一个普通 Android 应用运行：它在手机上监听代理端口，并从手机上的应用进程发起出站连接。
 
+非专业人员只需要阅读经典使用场景，从右侧release下载apk安装即可，本应用界面易于使用
+
 ## 为什么做这个项目
 
 - **基于 GOST：** 代理引擎是固定版本、从源码构建的 GOST 二进制，并随 APK 打包，启动前会做校验。
 - **面向长期稳定运行：** 应用内置前台服务、wake lock、进程监管、端口 watchdog、请求 watchdog、日志轮转、开机/升级恢复和 ADB 诊断。
 - **稳定的 Every Proxy 替代方案：** 对于常驻局域网代理网关场景，本项目目标是比 Every Proxy 这类轻量代理共享应用更稳定、更可诊断，同时保持开源、免费、无广告。
 - **可观测、可排障：** 状态、日志、健康检查、监听器状态和恢复行为都可以查看，而不是被藏在一个很轻量但不透明的界面后面。
+- 为了能在不支持地区使用先进但容易封号的AI服务，如Claude，GPT等。不少机场节点容易被封号或是降智。但是我发现Google Pixel手机内置Google VPN可以提供纯净的Google LLC节点，可以帮助你全速，安全的使用AI服务。
 
 ## 典型使用场景
 
@@ -129,6 +132,48 @@ scripts/host_preflight.sh
 ```
 
 该命令会写入 `reports/host-preflight-*`，内容包括 shell 语法检查、状态解析器自测、ADB 启动防护自测、LAN smoke 严格断言自测、Gradle build/lint/unit-test、APK 打包与稳定性关键 manifest 检查、GOST 来源校验、ADB 设备状态，以及简短的设备验证清单。
+
+## 发布 APK
+
+GitHub Actions 会在推送 `v*` tag 时构建已签名 APK，并把 APK 和 SHA256 文件上传到 GitHub Release。
+
+首次发布前，在本机生成长期保存的 release 签名 key：
+
+```sh
+keytool -genkeypair -v \
+  -keystore release.jks \
+  -alias pixel-proxy-gateway \
+  -keyalg RSA \
+  -keysize 4096 \
+  -validity 10000
+```
+
+不要提交 `release.jks`。把它转成一行 base64 后，填到 GitHub 仓库的 `Settings` -> `Secrets and variables` -> `Actions`：
+
+```sh
+base64 -i release.jks | tr -d '\n' | pbcopy
+```
+
+需要添加这些 repository secrets：
+
+- `ANDROID_KEYSTORE_BASE64`: 上面复制的 base64 内容
+- `ANDROID_KEYSTORE_PASSWORD`: keystore 密码
+- `ANDROID_KEY_ALIAS`: 例如 `pixel-proxy-gateway`
+- `ANDROID_KEY_PASSWORD`: key 密码；如果和 keystore 密码相同，可以留空
+
+发布新版本时，先确认 `app/build.gradle` 里的 `versionName` 和 `versionCode` 已更新，然后推送 tag：
+
+```sh
+git tag -a v1.0 -m "Pixel Proxy Gateway v1.0"
+git push origin v1.0
+```
+
+Actions 完成后，Release 页面会出现：
+
+```text
+pixel-proxy-gateway-v1.0.apk
+pixel-proxy-gateway-v1.0.apk.sha256
+```
 
 ## 安装与控制
 

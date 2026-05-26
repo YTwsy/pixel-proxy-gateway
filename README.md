@@ -130,6 +130,48 @@ scripts/host_preflight.sh
 
 This writes `reports/host-preflight-*` with shell syntax checks, status parser self-test, ADB start guard self-test, LAN smoke strict-assertion self-test, Gradle build/lint/unit-test, APK packaging plus stability-critical manifest checks, GOST provenance, ADB device status, and a short device-validation checklist.
 
+## Release APK
+
+GitHub Actions builds a signed APK when a `v*` tag is pushed, then uploads the APK and SHA256 file to the GitHub Release.
+
+Before the first release, generate a long-lived release signing key locally:
+
+```sh
+keytool -genkeypair -v \
+  -keystore release.jks \
+  -alias pixel-proxy-gateway \
+  -keyalg RSA \
+  -keysize 4096 \
+  -validity 10000
+```
+
+Do not commit `release.jks`. Convert it to one-line base64, then paste it into the GitHub repository under `Settings` -> `Secrets and variables` -> `Actions`:
+
+```sh
+base64 -i release.jks | tr -d '\n' | pbcopy
+```
+
+Add these repository secrets:
+
+- `ANDROID_KEYSTORE_BASE64`: the base64 value copied above
+- `ANDROID_KEYSTORE_PASSWORD`: keystore password
+- `ANDROID_KEY_ALIAS`: for example `pixel-proxy-gateway`
+- `ANDROID_KEY_PASSWORD`: key password; leave it empty when it matches the keystore password
+
+To publish a new version, first update `versionName` and `versionCode` in `app/build.gradle`, then push a tag:
+
+```sh
+git tag -a v1.0 -m "Pixel Proxy Gateway v1.0"
+git push origin v1.0
+```
+
+After Actions completes, the Release page will include:
+
+```text
+pixel-proxy-gateway-v1.0.apk
+pixel-proxy-gateway-v1.0.apk.sha256
+```
+
 ## Install And Control
 
 Install and start:
