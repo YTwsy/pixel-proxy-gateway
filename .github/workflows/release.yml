@@ -18,6 +18,7 @@ jobs:
   release:
     name: Build signed APK and publish release
     runs-on: ubuntu-latest
+    environment: release
     env:
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
