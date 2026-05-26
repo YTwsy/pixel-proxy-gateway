@@ -48,6 +48,24 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Prime Gradle wrapper distribution
+        run: |
+          distribution_url=$(grep '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties | cut -d= -f2-)
+          distribution_url="${distribution_url//\\:/\:}"
+          distribution_file=$(basename "$distribution_url")
+          distribution_name="${distribution_file%.zip}"
+          distribution_hash="5xuhj0ry160q40clulazy9h7d"
+          distribution_dir="$HOME/.gradle/wrapper/dists/$distribution_name/$distribution_hash"
+
+          if [ ! -d "$distribution_dir/gradle-8.13" ]; then
+            mkdir -p "$distribution_dir"
+            curl --fail --location --retry 5 --retry-all-errors \
+              --connect-timeout 60 --max-time 300 \
+              "$distribution_url" \
+              --output "$RUNNER_TEMP/$distribution_file"
+            unzip -q "$RUNNER_TEMP/$distribution_file" -d "$distribution_dir"
+          fi
+
       - name: Decode release signing key
         run: |
           missing=0
