@@ -64,6 +64,7 @@ jobs:
               "$distribution_url" \
               --output "$RUNNER_TEMP/$distribution_file"
             unzip -q "$RUNNER_TEMP/$distribution_file" -d "$distribution_dir"
+            touch "$distribution_dir/$distribution_file.ok"
           fi
 
       - name: Decode release signing key
