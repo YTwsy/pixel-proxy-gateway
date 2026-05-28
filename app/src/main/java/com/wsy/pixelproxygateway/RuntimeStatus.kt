@@ -37,6 +37,13 @@ data class RuntimeStatus(
     val nativeLibraryDir: String = "",
     val wakeLockHeld: Boolean = false,
     val batteryIgnoringOptimizations: Boolean = false,
+    val lastNetworkEventAt: String = "",
+    val lastNetworkEvent: String = "",
+    val lastNetworkSummary: String = "",
+    val lastNetworkProbeAt: String = "",
+    val lastNetworkProbeResult: String = "",
+    val networkRecoveryFailures: Int = 0,
+    val networkRecoveryRestartCount: Int = 0,
     val appVersion: String = "0.1.0",
 ) {
     fun toJson(): JSONObject {
@@ -75,6 +82,13 @@ data class RuntimeStatus(
             .put("nativeLibraryDir", nativeLibraryDir)
             .put("wakeLockHeld", wakeLockHeld)
             .put("batteryIgnoringOptimizations", batteryIgnoringOptimizations)
+            .put("lastNetworkEventAt", lastNetworkEventAt)
+            .put("lastNetworkEvent", lastNetworkEvent)
+            .put("lastNetworkSummary", lastNetworkSummary)
+            .put("lastNetworkProbeAt", lastNetworkProbeAt)
+            .put("lastNetworkProbeResult", lastNetworkProbeResult)
+            .put("networkRecoveryFailures", networkRecoveryFailures)
+            .put("networkRecoveryRestartCount", networkRecoveryRestartCount)
             .put("appVersion", appVersion)
     }
 
@@ -114,6 +128,13 @@ data class RuntimeStatus(
             appendLine("nativeLibraryDir=$nativeLibraryDir")
             appendLine("wakeLockHeld=$wakeLockHeld")
             appendLine("batteryIgnoringOptimizations=$batteryIgnoringOptimizations")
+            appendLine("lastNetworkEventAt=$lastNetworkEventAt")
+            appendLine("lastNetworkEvent=$lastNetworkEvent")
+            appendLine("lastNetworkSummary=$lastNetworkSummary")
+            appendLine("lastNetworkProbeAt=$lastNetworkProbeAt")
+            appendLine("lastNetworkProbeResult=$lastNetworkProbeResult")
+            appendLine("networkRecoveryFailures=$networkRecoveryFailures")
+            appendLine("networkRecoveryRestartCount=$networkRecoveryRestartCount")
             appendLine("appVersion=$appVersion")
         }
     }

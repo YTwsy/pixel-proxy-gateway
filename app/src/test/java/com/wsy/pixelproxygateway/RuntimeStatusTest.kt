@@ -21,6 +21,13 @@ class RuntimeStatusTest {
             restartCount = 7,
             lastRestartReason = "process_exit:1",
             lastError = "",
+            lastNetworkEventAt = "2026-05-17T05:01:00.000+08:00",
+            lastNetworkEvent = "available seq=3",
+            lastNetworkSummary = "transports=wifi capabilities=internet,validated if=wlan0 ipv4=192.168.1.103",
+            lastNetworkProbeAt = "2026-05-17T05:01:05.000+08:00",
+            lastNetworkProbeResult = "port=ok request=ok status=204 error=none",
+            networkRecoveryFailures = 1,
+            networkRecoveryRestartCount = 2,
         )
 
         val json = status.toJson()
@@ -33,6 +40,10 @@ class RuntimeStatusTest {
         assertEquals(true, json.getBoolean("autoStart"))
         assertEquals(1234, json.getLong("proxyPid"))
         assertEquals(7, json.getInt("restartCount"))
+        assertEquals("available seq=3", json.getString("lastNetworkEvent"))
+        assertEquals("port=ok request=ok status=204 error=none", json.getString("lastNetworkProbeResult"))
+        assertEquals(1, json.getInt("networkRecoveryFailures"))
+        assertEquals(2, json.getInt("networkRecoveryRestartCount"))
 
         val text = status.toText()
         assertTrue(text.contains("statusUpdatedAt=2026-05-17T05:00:00.000+08:00"))
@@ -43,5 +54,8 @@ class RuntimeStatusTest {
         assertTrue(text.contains("startOnBoot=true"))
         assertTrue(text.contains("autoStart=true"))
         assertTrue(text.contains("restartCount=7"))
+        assertTrue(text.contains("lastNetworkEvent=available seq=3"))
+        assertTrue(text.contains("lastNetworkProbeResult=port=ok request=ok status=204 error=none"))
+        assertTrue(text.contains("networkRecoveryRestartCount=2"))
     }
 }

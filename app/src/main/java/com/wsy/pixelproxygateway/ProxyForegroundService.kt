@@ -31,6 +31,7 @@ class ProxyForegroundService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastNotificationSnapshot: NotificationSnapshot? = null
     @Volatile private var config = ProxyConfig()
+    private lateinit var networkRecoveryMonitor: NetworkRecoveryMonitor
 
     override fun onCreate() {
         super.onCreate()
@@ -39,6 +40,16 @@ class ProxyForegroundService : Service() {
         statusStore = StatusStore(this)
         statusStore.loadFromDisk()
         manager = GostProcessManager(this, logStore, statusStore)
+        networkRecoveryMonitor = NetworkRecoveryMonitor(
+            context = this,
+            logStore = logStore,
+            statusStore = statusStore,
+            scheduler = scheduler,
+            configProvider = { config },
+            desiredRunningProvider = { statusStore.current().desiredRunning },
+            restartProxy = { reason -> manager.restart(reason) },
+            onStatusChanged = { updateNotification() },
+        )
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
         config = settingsStore.load()
@@ -60,6 +71,7 @@ class ProxyForegroundService : Service() {
         }
         startAsForeground()
         logStore.append("app", "service created")
+        networkRecoveryMonitor.start()
         if (config.autoStart) {
             if (!startProxy(config, "service_restore")) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -440,6 +452,7 @@ class ProxyForegroundService : Service() {
     override fun onDestroy() {
         logStore.append("app", "service destroyed")
         statusStore.update { it.copy(serviceRunning = false) }
+        networkRecoveryMonitor.stop()
         stopWatchdogs()
         releaseWakeLock()
         manager.shutdown()
