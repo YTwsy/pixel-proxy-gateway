@@ -4,11 +4,11 @@
 
 ## 概览
 
-Pixel Proxy Gateway 是一个单 APK、侧载安装的 Android 应用，用来把运行 VPN 的 Android 手机变成一个受监控的局域网 HTTP/SOCKS 代理出口，例如运行 Pixel 自带的 Google VPN，或 Clash Meta 等手机侧 VPN。
+Pixel Proxy Gateway 是一个单 APK、侧载安装的 Android 应用，用来把运行 VPN 的 Android 手机变成一个受监控的局域网 HTTP/SOCKS 代理出口，例如运行 Pixel 自带的 Google VPN，或 Clash Meta 等手机侧 VPN。以提供稳定，不易封号的可以使用Claude，GPT的网络
 
 本应用有意不实现 Android `VpnService`，这样手机侧 VPN 可以继续占用系统 VPN 槽位。Pixel Proxy Gateway 作为一个普通 Android 应用运行：它在手机上监听代理端口，并从手机上的应用进程发起出站连接。
 
-非专业人员只需要阅读经典使用场景，从右侧release下载apk安装即可，本应用界面易于使用
+不需要任何背景知识，只需要阅读下面的经典使用场景，从右侧release下载apk安装，点击start即可使用，本应用界面简洁美观，易于操作。
 
 ## 为什么做这个项目
 
@@ -16,7 +16,7 @@ Pixel Proxy Gateway 是一个单 APK、侧载安装的 Android 应用，用来�
 - **面向长期稳定运行：** 应用内置前台服务、wake lock、进程监管、端口 watchdog、请求 watchdog、日志轮转、开机/升级恢复和 ADB 诊断。
 - **稳定的 Every Proxy 替代方案：** 对于常驻局域网代理网关场景，本项目目标是比 Every Proxy 这类轻量代理共享应用更稳定、更可诊断，同时保持开源、免费、无广告。
 - **可观测、可排障：** 状态、日志、健康检查、监听器状态和恢复行为都可以查看，而不是被藏在一个很轻量但不透明的界面后面。
-- 为了能在不支持地区使用先进但容易封号的AI服务，如Claude，GPT等。不少机场节点容易被封号或是降智。但是我发现Google Pixel手机内置Google VPN可以提供纯净的Google LLC节点，可以帮助你全速，安全的使用AI服务。
+> 另一个重要的原因是为了能在不支持的地区使用先进但容易封号的 AI 服务，如 Claude, GPT 等。机场节点容易被封号或是降智一直以来都是部分地区用户十分头疼的问题，好消息是 Google Pixel 手机内置的 Google VPN 可以提供纯净的 Google LLC 节点，能够帮助手机全速，安全的使用 AI 服务，本项目的初衷即是为了将这个能力共享到 LAN 下的其他设备而不仅限于手机。
 
 ## 典型使用场景
 
