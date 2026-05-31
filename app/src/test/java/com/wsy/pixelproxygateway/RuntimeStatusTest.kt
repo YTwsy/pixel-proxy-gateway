@@ -18,6 +18,13 @@ class RuntimeStatusTest {
             autoStart = true,
             portOk = true,
             requestOk = true,
+            lastHttpProxyRequestOk = true,
+            lastHttpProxyStatus = 204,
+            lastHttpProxyError = "",
+            lastSocksProxyRequestOk = false,
+            lastSocksProxyStatus = 0,
+            lastSocksProxyError = "timeout",
+            lastProxyRequestSummary = "http=ok status=204 error=none; socks5=fail status=0 error=timeout",
             restartCount = 7,
             lastRestartReason = "process_exit:1",
             lastError = "",
@@ -40,6 +47,10 @@ class RuntimeStatusTest {
         assertEquals(true, json.getBoolean("autoStart"))
         assertEquals(1234, json.getLong("proxyPid"))
         assertEquals(7, json.getInt("restartCount"))
+        assertEquals(true, json.getBoolean("lastHttpProxyRequestOk"))
+        assertEquals(204, json.getInt("lastHttpProxyStatus"))
+        assertEquals(false, json.getBoolean("lastSocksProxyRequestOk"))
+        assertEquals("timeout", json.getString("lastSocksProxyError"))
         assertEquals("available seq=3", json.getString("lastNetworkEvent"))
         assertEquals("port=ok request=ok status=204 error=none", json.getString("lastNetworkProbeResult"))
         assertEquals(1, json.getInt("networkRecoveryFailures"))
@@ -54,6 +65,9 @@ class RuntimeStatusTest {
         assertTrue(text.contains("startOnBoot=true"))
         assertTrue(text.contains("autoStart=true"))
         assertTrue(text.contains("restartCount=7"))
+        assertTrue(text.contains("lastHttpProxyRequestOk=true"))
+        assertTrue(text.contains("lastSocksProxyError=timeout"))
+        assertTrue(text.contains("lastProxyRequestSummary=http=ok status=204 error=none; socks5=fail status=0 error=timeout"))
         assertTrue(text.contains("lastNetworkEvent=available seq=3"))
         assertTrue(text.contains("lastNetworkProbeResult=port=ok request=ok status=204 error=none"))
         assertTrue(text.contains("networkRecoveryRestartCount=2"))

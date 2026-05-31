@@ -27,6 +27,13 @@ data class RuntimeStatus(
     val requestOk: Boolean = false,
     val lastRequestCheckAt: String = "",
     val lastHttpStatus: Int = 0,
+    val lastHttpProxyRequestOk: Boolean = false,
+    val lastHttpProxyStatus: Int = 0,
+    val lastHttpProxyError: String = "",
+    val lastSocksProxyRequestOk: Boolean = false,
+    val lastSocksProxyStatus: Int = 0,
+    val lastSocksProxyError: String = "",
+    val lastProxyRequestSummary: String = "",
     val consecutiveFailures: Int = 0,
     val lastError: String = "",
     val gostVersion: String = "",
@@ -72,6 +79,13 @@ data class RuntimeStatus(
             .put("requestOk", requestOk)
             .put("lastRequestCheckAt", lastRequestCheckAt)
             .put("lastHttpStatus", lastHttpStatus)
+            .put("lastHttpProxyRequestOk", lastHttpProxyRequestOk)
+            .put("lastHttpProxyStatus", lastHttpProxyStatus)
+            .put("lastHttpProxyError", lastHttpProxyError)
+            .put("lastSocksProxyRequestOk", lastSocksProxyRequestOk)
+            .put("lastSocksProxyStatus", lastSocksProxyStatus)
+            .put("lastSocksProxyError", lastSocksProxyError)
+            .put("lastProxyRequestSummary", lastProxyRequestSummary)
             .put("consecutiveFailures", consecutiveFailures)
             .put("lastError", lastError)
             .put("gostVersion", gostVersion)
@@ -118,6 +132,13 @@ data class RuntimeStatus(
             appendLine("requestOk=$requestOk")
             appendLine("lastRequestCheckAt=$lastRequestCheckAt")
             appendLine("lastHttpStatus=$lastHttpStatus")
+            appendLine("lastHttpProxyRequestOk=$lastHttpProxyRequestOk")
+            appendLine("lastHttpProxyStatus=$lastHttpProxyStatus")
+            appendLine("lastHttpProxyError=$lastHttpProxyError")
+            appendLine("lastSocksProxyRequestOk=$lastSocksProxyRequestOk")
+            appendLine("lastSocksProxyStatus=$lastSocksProxyStatus")
+            appendLine("lastSocksProxyError=$lastSocksProxyError")
+            appendLine("lastProxyRequestSummary=$lastProxyRequestSummary")
             appendLine("consecutiveFailures=$consecutiveFailures")
             appendLine("lastError=$lastError")
             appendLine("gostVersion=$gostVersion")

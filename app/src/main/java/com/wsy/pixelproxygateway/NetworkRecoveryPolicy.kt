@@ -65,6 +65,6 @@ object NetworkRecoveryPolicy {
         val port = if (result.portOk) "ok" else "fail"
         val request = if (result.requestOk) "ok" else "fail"
         val error = result.lastError.ifBlank { "none" }
-        return "port=$port request=$request status=${result.requestStatus} error=$error"
+        return "port=$port request=$request status=${result.requestStatus} error=$error details=${result.requestSummary}"
     }
 }

@@ -22,7 +22,7 @@ class NetworkRecoveryPolicyTest {
 
         assertEquals(NetworkRecoveryAction.CLEAR_FAILURES, decision.action)
         assertEquals(0, decision.nextFailures)
-        assertEquals("port=ok request=ok status=204 error=none", decision.summary)
+        assertEquals("port=ok request=ok status=204 error=none details=none", decision.summary)
     }
 
     @Test
@@ -88,6 +88,10 @@ class NetworkRecoveryPolicyTest {
             requestOk = false,
             requestStatus = 0,
             requestError = "timeout",
+            requestResults = listOf(
+                ProxyRequestResult("http", ok = true, status = 204, error = ""),
+                ProxyRequestResult("socks5", ok = false, status = 0, error = "timeout"),
+            ),
         )
     }
 }

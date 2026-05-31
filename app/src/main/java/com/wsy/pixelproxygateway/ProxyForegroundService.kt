@@ -280,23 +280,35 @@ class ProxyForegroundService : Service() {
 
         requestFuture = scheduler.scheduleWithFixedDelay({
             runCatching {
-                val result = HealthWatchdogs.checkRequest(config)
+                val requestResult = HealthWatchdogs.checkRequests(config)
+                val healthResult = HealthCheckResult(
+                    portOk = true,
+                    portMessage = "ok",
+                    requestOk = requestResult.ok,
+                    requestStatus = requestResult.status,
+                    requestError = requestResult.error,
+                    requestResults = requestResult.results,
+                )
                 val next = statusStore.update {
-                    it.copy(
-                        requestOk = result.ok,
+                    HealthStatus.applyRequestDetails(it.copy(
+                        requestOk = requestResult.ok,
                         lastRequestCheckAt = TimeUtil.now(),
-                        lastHttpStatus = result.status,
+                        lastHttpStatus = requestResult.status,
                         wakeLockHeld = wakeLock?.isHeld == true,
                         batteryIgnoringOptimizations = isIgnoringBatteryOptimizations(),
-                        consecutiveFailures = if (result.ok) 0 else it.consecutiveFailures + 1,
-                        lastError = if (result.ok) "" else result.error,
+                        consecutiveFailures = if (requestResult.ok) 0 else it.consecutiveFailures + 1,
+                        lastError = if (requestResult.ok) "" else requestResult.error,
+                    ), healthResult)
+                }
+                if (!requestResult.ok) {
+                    logStore.append(
+                        "app",
+                        "request watchdog fail count=${next.consecutiveFailures} " +
+                            "error=${requestResult.error} details=${healthResult.requestSummary}",
                     )
                 }
-                if (!result.ok) {
-                    logStore.append("app", "request watchdog fail count=${next.consecutiveFailures} error=${result.error}")
-                }
-                if (!result.ok && next.consecutiveFailures >= config.failureThreshold) {
-                    manager.restart("request_watchdog:${result.error}")
+                if (!requestResult.ok && next.consecutiveFailures >= config.failureThreshold) {
+                    manager.restart("request_watchdog:${requestResult.error}")
                     statusStore.update { it.copy(consecutiveFailures = 0) }
                 }
                 updateNotification()

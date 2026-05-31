@@ -133,6 +133,31 @@ class HealthWatchdogsTest {
         }
     }
 
+    @Test
+    fun checkRequestsReportsSocksFailureEvenWhenHttpWorks() {
+        val closedSocksPort = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        OneShotHttpProxy(responseStatus = 204, responseReason = "No Content").use { http ->
+            val result = HealthWatchdogs.checkRequests(
+                ProxyConfig(
+                    bindAddress = "localhost",
+                    httpPort = http.port,
+                    socksPort = closedSocksPort,
+                    enableHttp = true,
+                    enableSocks = true,
+                    healthUrl = "http://example.test/generate_204",
+                    expectedStatus = "204",
+                    timeoutSeconds = 3,
+                ),
+            )
+            http.await()
+
+            assertFalse(result.ok)
+            assertEquals(204, result.results.first { it.listener == "http" }.status)
+            assertFalse(result.results.first { it.listener == "socks5" }.ok)
+            assertTrue(result.error, result.error.contains("socks5 request failed"))
+        }
+    }
+
     private class OneShotListener(host: String) : Closeable {
         private val server = ServerSocket(0, 1, InetAddress.getByName(host))
         val port: Int = server.localPort

@@ -27,6 +27,7 @@ class HealthStatusTest {
                 requestOk = true,
                 requestStatus = 204,
                 requestError = "",
+                requestResults = listOf(ProxyRequestResult("http", ok = true, status = 204, error = "")),
             ),
             checkedAt = "2026-05-21T10:00:00.000+08:00",
         )
@@ -39,6 +40,10 @@ class HealthStatusTest {
         assertEquals(204, updated.lastHttpStatus)
         assertEquals(0, updated.consecutiveFailures)
         assertEquals("", updated.lastError)
+        assertTrue(updated.lastHttpProxyRequestOk)
+        assertEquals(204, updated.lastHttpProxyStatus)
+        assertFalse(updated.lastSocksProxyRequestOk)
+        assertEquals("disabled", updated.lastSocksProxyError)
         assertEquals("2026-05-21T10:00:00.000+08:00", updated.lastRequestCheckAt)
     }
 
@@ -55,6 +60,10 @@ class HealthStatusTest {
                 requestOk = false,
                 requestStatus = 500,
                 requestError = "unexpected status 500",
+                requestResults = listOf(
+                    ProxyRequestResult("http", ok = true, status = 204, error = ""),
+                    ProxyRequestResult("socks5", ok = false, status = 500, error = "unexpected status 500"),
+                ),
             ),
             checkedAt = "2026-05-21T10:01:00.000+08:00",
         )
@@ -64,5 +73,8 @@ class HealthStatusTest {
         assertEquals(500, updated.lastHttpStatus)
         assertEquals(3, updated.consecutiveFailures)
         assertEquals("unexpected status 500", updated.lastError)
+        assertTrue(updated.lastHttpProxyRequestOk)
+        assertFalse(updated.lastSocksProxyRequestOk)
+        assertEquals("unexpected status 500", updated.lastSocksProxyError)
     }
 }

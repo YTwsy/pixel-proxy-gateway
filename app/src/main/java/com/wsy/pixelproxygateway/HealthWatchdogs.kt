@@ -13,13 +13,14 @@ import java.util.Base64
 object HealthWatchdogs {
     fun checkAll(config: ProxyConfig): HealthCheckResult {
         val portResult = checkPorts(config, config.timeoutSeconds * 1000)
-        val requestResult = checkRequest(config)
+        val requestResult = checkRequests(config)
         return HealthCheckResult(
             portOk = portResult.first,
             portMessage = portResult.second,
             requestOk = requestResult.ok,
             requestStatus = requestResult.status,
             requestError = requestResult.error,
+            requestResults = requestResult.results,
         )
     }
 
@@ -52,14 +53,59 @@ object HealthWatchdogs {
 
     @Synchronized
     fun checkRequest(config: ProxyConfig): RequestResult {
+        val result = checkRequests(config)
+        return RequestResult(
+            ok = result.ok,
+            status = result.status,
+            error = result.error,
+        )
+    }
+
+    @Synchronized
+    fun checkRequests(config: ProxyConfig): RequestCheckResult {
         val host = portCheckHost(config.bindAddress)
-        val proxy = if (config.enableHttp) {
-            Proxy(Proxy.Type.HTTP, InetSocketAddress(host, config.httpPort))
-        } else if (config.enableSocks) {
-            Proxy(Proxy.Type.SOCKS, InetSocketAddress(host, config.socksPort))
-        } else {
-            return RequestResult(ok = false, status = 0, error = "no listeners enabled")
+        val targets = mutableListOf<ProxyRequestTarget>()
+        if (config.enableHttp) {
+            targets += ProxyRequestTarget(
+                listener = ProxyListener.HTTP,
+                proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress(host, config.httpPort)),
+            )
         }
+        if (config.enableSocks) {
+            targets += ProxyRequestTarget(
+                listener = ProxyListener.SOCKS5,
+                proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(host, config.socksPort)),
+            )
+        }
+        if (targets.isEmpty()) {
+            return RequestCheckResult(
+                ok = false,
+                status = 0,
+                error = "no listeners enabled",
+                results = emptyList(),
+            )
+        }
+
+        val results = targets.map { target ->
+            val result = checkRequestViaProxy(config, target.proxy)
+            ProxyRequestResult(
+                listener = target.listener.id,
+                ok = result.ok,
+                status = result.status,
+                error = result.error,
+            )
+        }
+        val firstFailure = results.firstOrNull { !it.ok }
+        val ok = firstFailure == null
+        return RequestCheckResult(
+            ok = ok,
+            status = firstFailure?.status ?: results.firstOrNull()?.status ?: 0,
+            error = if (ok) "" else requestSummary(results.filter { !it.ok }),
+            results = results,
+        )
+    }
+
+    private fun checkRequestViaProxy(config: ProxyConfig, proxy: Proxy): RequestResult {
         return withProxyAuthenticator(config) {
             val connection = URL(config.healthUrl).openConnection(proxy) as HttpURLConnection
             connection.connectTimeout = config.timeoutSeconds * 1000
@@ -80,6 +126,13 @@ object HealthWatchdogs {
                 status = status,
                 error = if (expected.contains(status)) "" else "unexpected status $status expected=${config.expectedStatus}",
             )
+        }
+    }
+
+    private fun requestSummary(results: List<ProxyRequestResult>): String {
+        return results.joinToString("; ") { result ->
+            val detail = result.error.ifBlank { "status ${result.status}" }
+            "${result.listener} request failed: $detail"
         }
     }
 
@@ -112,7 +165,31 @@ object HealthWatchdogs {
     }
 }
 
+private enum class ProxyListener(val id: String) {
+    HTTP("http"),
+    SOCKS5("socks5"),
+}
+
+private data class ProxyRequestTarget(
+    val listener: ProxyListener,
+    val proxy: Proxy,
+)
+
 data class RequestResult(
+    val ok: Boolean,
+    val status: Int,
+    val error: String,
+)
+
+data class RequestCheckResult(
+    val ok: Boolean,
+    val status: Int,
+    val error: String,
+    val results: List<ProxyRequestResult>,
+)
+
+data class ProxyRequestResult(
+    val listener: String,
     val ok: Boolean,
     val status: Int,
     val error: String,
@@ -124,12 +201,27 @@ data class HealthCheckResult(
     val requestOk: Boolean,
     val requestStatus: Int,
     val requestError: String,
+    val requestResults: List<ProxyRequestResult> = emptyList(),
 ) {
     val ok: Boolean get() = portOk && requestOk
+    val requestSummary: String
+        get() = if (requestResults.isEmpty()) {
+            requestError.ifBlank { "none" }
+        } else {
+            requestResults.joinToString("; ") {
+                val state = if (it.ok) "ok" else "fail"
+                val error = it.error.ifBlank { "none" }
+                "${it.listener}=$state status=${it.status} error=$error"
+            }
+        }
     val lastError: String
         get() = when {
             !portOk -> portMessage
             !requestOk -> requestError
             else -> ""
         }
+
+    fun requestResultFor(listener: String): ProxyRequestResult? {
+        return requestResults.firstOrNull { it.listener == listener }
+    }
 }

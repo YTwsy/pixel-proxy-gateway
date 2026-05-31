@@ -183,7 +183,7 @@ class NetworkRecoveryMonitor(
                 lastNetworkProbeAt = checkedAt,
                 lastNetworkProbeResult = decision.summary,
                 networkRecoveryFailures = decision.nextFailures,
-            )
+            ).let { updated -> HealthStatus.applyRequestDetails(updated, result) }
         }
         logStore.append(
             "app",
