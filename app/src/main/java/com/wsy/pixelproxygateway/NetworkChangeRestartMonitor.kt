@@ -1,0 +1,325 @@
+package com.wsy.pixelproxygateway
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import java.net.Inet4Address
+import java.net.Inet6Address
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
+
+class NetworkChangeRestartMonitor(
+    context: Context,
+    private val logStore: LogStore,
+    private val statusStore: StatusStore,
+    private val scheduler: ScheduledExecutorService,
+    private val desiredRunningProvider: () -> Boolean,
+    private val restartProxy: (String) -> Unit,
+    private val onStatusChanged: () -> Unit,
+) {
+    private val appContext = context.applicationContext
+    private val connectivityManager = appContext.getSystemService(ConnectivityManager::class.java)
+    private val lock = Any()
+    private var registered = false
+    private var pendingRestart: ScheduledFuture<*>? = null
+    private var eventSequence = 0L
+    private var lastRestartAtMillis = 0L
+    private var lastRestartNetworkKey = ""
+
+    private val callback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            recordNetworkEvent("available", network)
+        }
+
+        override fun onLost(network: Network) {
+            recordNetworkEvent("lost", network)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            recordNetworkEvent("capabilities_changed", network)
+        }
+
+        override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+            recordNetworkEvent("link_properties_changed", network)
+        }
+    }
+
+    fun start() {
+        val shouldRegister = synchronized(lock) {
+            if (registered) {
+                false
+            } else {
+                registered = true
+                true
+            }
+        }
+        if (!shouldRegister) return
+
+        val snapshot = networkSnapshot()
+        statusStore.update {
+            it.copy(
+                lastNetworkEventAt = TimeUtil.now(),
+                lastNetworkEvent = "monitor_start",
+                lastNetworkSummary = snapshot.summary,
+            )
+        }
+        logStore.append("app", "network restart monitor start ${snapshot.summary}")
+        runCatching {
+            connectivityManager.registerDefaultNetworkCallback(callback)
+        }.getOrElse {
+            synchronized(lock) {
+                registered = false
+            }
+            val message = it.message ?: it.javaClass.simpleName
+            logStore.append("app", "network restart monitor registration failed error=$message")
+            statusStore.update { status ->
+                status.copy(
+                    lastNetworkEventAt = TimeUtil.now(),
+                    lastNetworkEvent = "monitor_registration_failed",
+                    lastNetworkSummary = message,
+                    lastError = "network monitor registration failed: $message",
+                )
+            }
+        }
+    }
+
+    fun stop() {
+        val shouldUnregister = synchronized(lock) {
+            pendingRestart?.cancel(false)
+            pendingRestart = null
+            if (registered) {
+                registered = false
+                true
+            } else {
+                false
+            }
+        }
+        if (shouldUnregister) {
+            runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+                .onFailure { logStore.append("app", "network restart monitor unregister failed error=${it.message}") }
+        }
+        logStore.append("app", "network restart monitor stop")
+    }
+
+    private fun recordNetworkEvent(event: String, network: Network) {
+        val sequence = synchronized(lock) {
+            if (!registered) {
+                null
+            } else {
+                eventSequence += 1
+                eventSequence
+            }
+        } ?: return
+        val snapshot = networkSnapshot(eventNetwork = network)
+        val desiredRunning = desiredRunningProvider()
+        logStore.append(
+            "app",
+            "network event seq=$sequence event=$event desired=$desiredRunning ${snapshot.summary}",
+        )
+        statusStore.update {
+            it.copy(
+                lastNetworkEventAt = TimeUtil.now(),
+                lastNetworkEvent = "$event seq=$sequence",
+                lastNetworkSummary = snapshot.summary,
+            )
+        }
+
+        if (event == "lost") {
+            cancelPendingRestart("network_lost seq=$sequence")
+            onStatusChanged()
+            return
+        }
+
+        if (!desiredRunning) {
+            logStore.append("app", "network restart skipped seq=$sequence event=$event reason=proxy_not_desired")
+            onStatusChanged()
+            return
+        }
+
+        scheduleRestart(event, sequence)
+        onStatusChanged()
+    }
+
+    private fun scheduleRestart(trigger: String, sequence: Long) {
+        synchronized(lock) {
+            pendingRestart?.cancel(false)
+            pendingRestart = scheduler.schedule(
+                { runScheduledRestart(trigger, sequence) },
+                NetworkChangeRestartPolicy.RESTART_DELAY_SECONDS,
+                TimeUnit.SECONDS,
+            )
+        }
+        logStore.append(
+            "app",
+            "network restart scheduled trigger=$trigger seq=$sequence delay=${NetworkChangeRestartPolicy.RESTART_DELAY_SECONDS}s",
+        )
+    }
+
+    private fun cancelPendingRestart(reason: String) {
+        val cancelled = synchronized(lock) {
+            val pending = pendingRestart
+            pendingRestart = null
+            pending?.cancel(false) == true
+        }
+        if (cancelled) {
+            logStore.append("app", "network restart cancelled reason=$reason")
+        }
+    }
+
+    private fun runScheduledRestart(trigger: String, sequence: Long) {
+        synchronized(lock) {
+            pendingRestart = null
+        }
+        val snapshot = networkSnapshot()
+        val nowMillis = System.currentTimeMillis()
+        val desiredRunning = desiredRunningProvider()
+        if (!snapshot.hasActiveInternetNetwork) {
+            val summary = "no active internet network"
+            logStore.append(
+                "app",
+                "network restart skipped trigger=$trigger seq=$sequence action=SKIP_NO_NETWORK $summary ${snapshot.summary}",
+            )
+            statusStore.update {
+                it.copy(
+                    lastNetworkRestartReason = summary,
+                    lastNetworkSummary = snapshot.summary,
+                )
+            }
+            onStatusChanged()
+            return
+        }
+        val decision = synchronized(lock) {
+            NetworkChangeRestartPolicy.decide(
+                desiredRunning = desiredRunning,
+                nowMillis = nowMillis,
+                activeNetworkKey = snapshot.key,
+                lastRestartAtMillis = lastRestartAtMillis,
+                lastRestartNetworkKey = lastRestartNetworkKey,
+            )
+        }
+        val checkedAt = TimeUtil.format(nowMillis)
+        if (decision.action != NetworkChangeRestartAction.RESTART) {
+            logStore.append(
+                "app",
+                "network restart skipped trigger=$trigger seq=$sequence action=${decision.action} ${decision.summary} ${snapshot.summary}",
+            )
+            statusStore.update {
+                it.copy(
+                    lastNetworkRestartReason = decision.summary,
+                    lastNetworkSummary = snapshot.summary,
+                )
+            }
+            onStatusChanged()
+            return
+        }
+
+        val reason = NetworkChangeRestartPolicy.restartReason(trigger, sequence, snapshot.summary)
+        synchronized(lock) {
+            lastRestartAtMillis = nowMillis
+            lastRestartNetworkKey = snapshot.key
+        }
+        statusStore.update {
+            it.copy(
+                lastNetworkRestartAt = checkedAt,
+                lastNetworkRestartReason = reason,
+                lastNetworkSummary = snapshot.summary,
+                networkRestartCount = it.networkRestartCount + 1,
+            )
+        }
+        logStore.append("app", "network restart executing reason=$reason")
+        restartProxy(reason)
+        onStatusChanged()
+    }
+
+    private fun networkSnapshot(eventNetwork: Network? = null): NetworkSnapshot {
+        val active = connectivityManager.activeNetwork
+        val capabilities = active?.let { connectivityManager.getNetworkCapabilities(it) }
+        val linkProperties = active?.let { connectivityManager.getLinkProperties(it) }
+        val transports = transportsSummary(capabilities)
+        val link = linkSummary(linkProperties)
+        val activeId = active?.toString() ?: "none"
+        val hasActiveInternetNetwork = active != null &&
+            capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        val eventPart = eventNetwork?.let { "eventNetwork=$it " }.orEmpty()
+        val summary = eventPart +
+            "active=$activeId " +
+            "transports=$transports " +
+            "capabilities=${capabilitiesSummary(capabilities)} " +
+            link.summary
+        val key = listOf(activeId, transports, link.interfaceName, link.ipv4, link.dns).joinToString("|")
+        return NetworkSnapshot(summary = summary, key = key, hasActiveInternetNetwork = hasActiveInternetNetwork)
+    }
+
+    private fun transportsSummary(capabilities: NetworkCapabilities?): String {
+        if (capabilities == null) return "none"
+        return listOf(
+            NetworkCapabilities.TRANSPORT_WIFI to "wifi",
+            NetworkCapabilities.TRANSPORT_CELLULAR to "cellular",
+            NetworkCapabilities.TRANSPORT_VPN to "vpn",
+            NetworkCapabilities.TRANSPORT_ETHERNET to "ethernet",
+            NetworkCapabilities.TRANSPORT_BLUETOOTH to "bluetooth",
+        ).filter { capabilities.hasTransport(it.first) }
+            .joinToString(",") { it.second }
+            .ifBlank { "unknown" }
+    }
+
+    private fun capabilitiesSummary(capabilities: NetworkCapabilities?): String {
+        if (capabilities == null) return "none"
+        return listOf(
+            NetworkCapabilities.NET_CAPABILITY_INTERNET to "internet",
+            NetworkCapabilities.NET_CAPABILITY_VALIDATED to "validated",
+            NetworkCapabilities.NET_CAPABILITY_NOT_METERED to "not_metered",
+            NetworkCapabilities.NET_CAPABILITY_NOT_VPN to "not_vpn",
+            NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL to "captive_portal",
+        ).filter { capabilities.hasCapability(it.first) }
+            .joinToString(",") { it.second }
+            .ifBlank { "none" }
+    }
+
+    private fun linkSummary(linkProperties: LinkProperties?): LinkSnapshot {
+        if (linkProperties == null) {
+            return LinkSnapshot(
+                summary = "link=none",
+                interfaceName = "none",
+                ipv4 = "none",
+                dns = "none",
+            )
+        }
+        val ipv4 = linkProperties.linkAddresses
+            .map { it.address }
+            .filterIsInstance<Inet4Address>()
+            .joinToString(",") { it.hostAddress ?: "" }
+            .ifBlank { "none" }
+        val ipv6Count = linkProperties.linkAddresses
+            .map { it.address }
+            .filterIsInstance<Inet6Address>()
+            .count()
+        val dns = linkProperties.dnsServers
+            .joinToString(",") { it.hostAddress ?: "" }
+            .ifBlank { "none" }
+        val httpProxy = linkProperties.httpProxy?.let { "${it.host}:${it.port}" } ?: "none"
+        val interfaceName = linkProperties.interfaceName ?: "none"
+        return LinkSnapshot(
+            summary = "if=$interfaceName ipv4=$ipv4 ipv6=$ipv6Count dns=$dns routes=${linkProperties.routes.size} httpProxy=$httpProxy",
+            interfaceName = interfaceName,
+            ipv4 = ipv4,
+            dns = dns,
+        )
+    }
+
+    private data class NetworkSnapshot(
+        val summary: String,
+        val key: String,
+        val hasActiveInternetNetwork: Boolean,
+    )
+
+    private data class LinkSnapshot(
+        val summary: String,
+        val interfaceName: String,
+        val ipv4: String,
+        val dns: String,
+    )
+}

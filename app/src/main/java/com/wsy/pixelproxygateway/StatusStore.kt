@@ -72,6 +72,12 @@ class StatusStore(context: Context) {
                 wakeLockHeld = json.optBoolean("wakeLockHeld", false),
                 batteryIgnoringOptimizations = json.optBoolean("batteryIgnoringOptimizations", false),
                 appVersion = json.optString("appVersion", "0.1.0"),
+                lastNetworkEventAt = json.optString("lastNetworkEventAt", ""),
+                lastNetworkEvent = json.optString("lastNetworkEvent", ""),
+                lastNetworkSummary = json.optString("lastNetworkSummary", ""),
+                lastNetworkRestartAt = json.optString("lastNetworkRestartAt", ""),
+                lastNetworkRestartReason = json.optString("lastNetworkRestartReason", ""),
+                networkRestartCount = json.optInt("networkRestartCount", 0),
             )
         }.getOrNull()
     }
