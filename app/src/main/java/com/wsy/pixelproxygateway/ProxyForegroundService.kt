@@ -23,6 +23,7 @@ class ProxyForegroundService : Service() {
     private lateinit var logStore: LogStore
     private lateinit var statusStore: StatusStore
     private lateinit var manager: GostProcessManager
+    private lateinit var networkChangeRestartMonitor: NetworkChangeRestartMonitor
     private lateinit var notificationManager: NotificationManager
 
     private val scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(2)
@@ -39,6 +40,15 @@ class ProxyForegroundService : Service() {
         statusStore = StatusStore(this)
         statusStore.loadFromDisk()
         manager = GostProcessManager(this, logStore, statusStore)
+        networkChangeRestartMonitor = NetworkChangeRestartMonitor(
+            context = this,
+            logStore = logStore,
+            statusStore = statusStore,
+            scheduler = scheduler,
+            desiredRunningProvider = { statusStore.current().desiredRunning },
+            restartProxy = { reason -> manager.restart(config, reason) },
+            onStatusChanged = { updateNotification() },
+        )
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
         config = settingsStore.load()
@@ -64,8 +74,10 @@ class ProxyForegroundService : Service() {
             if (!startProxy(config, "service_restore")) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
+                return
             }
         }
+        networkChangeRestartMonitor.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -440,6 +452,7 @@ class ProxyForegroundService : Service() {
     override fun onDestroy() {
         logStore.append("app", "service destroyed")
         statusStore.update { it.copy(serviceRunning = false) }
+        networkChangeRestartMonitor.stop()
         stopWatchdogs()
         releaseWakeLock()
         manager.shutdown()

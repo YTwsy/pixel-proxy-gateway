@@ -38,6 +38,12 @@ data class RuntimeStatus(
     val wakeLockHeld: Boolean = false,
     val batteryIgnoringOptimizations: Boolean = false,
     val appVersion: String = "0.1.0",
+    val lastNetworkEventAt: String = "",
+    val lastNetworkEvent: String = "",
+    val lastNetworkSummary: String = "",
+    val lastNetworkRestartAt: String = "",
+    val lastNetworkRestartReason: String = "",
+    val networkRestartCount: Int = 0,
 ) {
     fun toJson(): JSONObject {
         return JSONObject()
@@ -76,6 +82,12 @@ data class RuntimeStatus(
             .put("wakeLockHeld", wakeLockHeld)
             .put("batteryIgnoringOptimizations", batteryIgnoringOptimizations)
             .put("appVersion", appVersion)
+            .put("lastNetworkEventAt", lastNetworkEventAt)
+            .put("lastNetworkEvent", lastNetworkEvent)
+            .put("lastNetworkSummary", lastNetworkSummary)
+            .put("lastNetworkRestartAt", lastNetworkRestartAt)
+            .put("lastNetworkRestartReason", lastNetworkRestartReason)
+            .put("networkRestartCount", networkRestartCount)
     }
 
     fun toText(): String {
@@ -115,6 +127,12 @@ data class RuntimeStatus(
             appendLine("wakeLockHeld=$wakeLockHeld")
             appendLine("batteryIgnoringOptimizations=$batteryIgnoringOptimizations")
             appendLine("appVersion=$appVersion")
+            appendLine("lastNetworkEventAt=$lastNetworkEventAt")
+            appendLine("lastNetworkEvent=$lastNetworkEvent")
+            appendLine("lastNetworkSummary=$lastNetworkSummary")
+            appendLine("lastNetworkRestartAt=$lastNetworkRestartAt")
+            appendLine("lastNetworkRestartReason=$lastNetworkRestartReason")
+            appendLine("networkRestartCount=$networkRestartCount")
         }
     }
 }
