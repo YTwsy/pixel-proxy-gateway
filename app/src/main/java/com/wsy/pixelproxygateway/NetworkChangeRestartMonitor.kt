@@ -31,6 +31,7 @@ class NetworkChangeRestartMonitor(
     private var eventSequence = 0L
     private var lastRestartAtMillis = 0L
     private var lastRestartNetworkKey = ""
+    private val lastObservedNetworkKeys = mutableMapOf<String, String>()
 
     private val defaultNetworkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -78,6 +79,7 @@ class NetworkChangeRestartMonitor(
                 false
             } else {
                 registered = true
+                lastObservedNetworkKeys.clear()
                 true
             }
         }
@@ -144,6 +146,7 @@ class NetworkChangeRestartMonitor(
             defaultCallbackRegistered = false
             observedCallbackRegistered = false
             registered = false
+            lastObservedNetworkKeys.clear()
             callbacks
         }
         if (callbacksToUnregister.defaultNetwork) {
@@ -159,10 +162,38 @@ class NetworkChangeRestartMonitor(
 
     private fun recordObservedNetworkEvent(event: String, network: Network) {
         if (network == connectivityManager.activeNetwork) return
-        recordNetworkEvent(event, network)
+        val eventDetail = networkDetail("event", network)
+        val eligibility = synchronized(lock) {
+            val networkId = network.toString()
+            val previousKey = lastObservedNetworkKeys[networkId]
+            val decision = NetworkChangeRestartPolicy.observedRestartEligibility(
+                event = event,
+                observedNetworkKey = eventDetail.key,
+                previousObservedNetworkKey = previousKey,
+            )
+            if (event == "observed_lost") {
+                lastObservedNetworkKeys.remove(networkId)
+            } else {
+                lastObservedNetworkKeys[networkId] = eventDetail.key
+            }
+            decision
+        }
+        recordNetworkEvent(
+            event = event,
+            network = network,
+            eventDetail = eventDetail,
+            restartEligible = eligibility.scheduleRestart,
+            restartSkipReason = eligibility.summary,
+        )
     }
 
-    private fun recordNetworkEvent(event: String, network: Network) {
+    private fun recordNetworkEvent(
+        event: String,
+        network: Network,
+        eventDetail: NetworkDetail? = null,
+        restartEligible: Boolean = true,
+        restartSkipReason: String = "",
+    ) {
         val sequence = synchronized(lock) {
             if (!registered) {
                 null
@@ -171,7 +202,7 @@ class NetworkChangeRestartMonitor(
                 eventSequence
             }
         } ?: return
-        val snapshot = networkSnapshot(eventNetwork = network)
+        val snapshot = networkSnapshot(eventNetwork = network, eventDetail = eventDetail)
         val desiredRunning = desiredRunningProvider()
         logStore.append(
             "app",
@@ -193,6 +224,12 @@ class NetworkChangeRestartMonitor(
 
         if (!desiredRunning) {
             logStore.append("app", "network restart skipped seq=$sequence event=$event reason=proxy_not_desired")
+            onStatusChanged()
+            return
+        }
+
+        if (!restartEligible) {
+            logStore.append("app", "network restart skipped seq=$sequence event=$event reason=$restartSkipReason")
             onStatusChanged()
             return
         }
@@ -292,7 +329,7 @@ class NetworkChangeRestartMonitor(
         onStatusChanged()
     }
 
-    private fun networkSnapshot(eventNetwork: Network? = null): NetworkSnapshot {
+    private fun networkSnapshot(eventNetwork: Network? = null, eventDetail: NetworkDetail? = null): NetworkSnapshot {
         val active = connectivityManager.activeNetwork
         val capabilities = active?.let { connectivityManager.getNetworkCapabilities(it) }
         val linkProperties = active?.let { connectivityManager.getLinkProperties(it) }
@@ -301,8 +338,8 @@ class NetworkChangeRestartMonitor(
         val activeId = active?.toString() ?: "none"
         val hasActiveInternetNetwork = active != null &&
             capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        val eventDetail = eventNetwork?.let { networkDetail("event", it) }
-        val eventPart = eventDetail?.let { "${it.summary} " }.orEmpty()
+        val resolvedEventDetail = eventDetail ?: eventNetwork?.let { networkDetail("event", it) }
+        val eventPart = resolvedEventDetail?.let { "${it.summary} " }.orEmpty()
         val summary = eventPart +
             "active=$activeId " +
             "transports=$transports " +
@@ -314,7 +351,7 @@ class NetworkChangeRestartMonitor(
             link.interfaceName,
             link.ipv4,
             link.dns,
-            eventDetail?.key ?: "event=none",
+            resolvedEventDetail?.key ?: "event=none",
         ).joinToString("|")
         return NetworkSnapshot(summary = summary, key = key, hasActiveInternetNetwork = hasActiveInternetNetwork)
     }

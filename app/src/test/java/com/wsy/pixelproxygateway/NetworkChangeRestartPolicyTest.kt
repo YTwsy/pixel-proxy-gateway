@@ -1,6 +1,8 @@
 package com.wsy.pixelproxygateway
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.TimeUnit
 
@@ -55,5 +57,43 @@ class NetworkChangeRestartPolicyTest {
         )
 
         assertEquals(NetworkChangeRestartAction.RESTART, decision.action)
+    }
+
+    @Test
+    fun duplicateObservedCapabilitiesWithoutIdentityChangeDoesNotScheduleRestart() {
+        val networkKey = "event=114,wifi,wlan0,192.168.1.103,114.114.114.114,8.8.8.8"
+
+        val decision = NetworkChangeRestartPolicy.observedRestartEligibility(
+            event = "observed_capabilities_changed",
+            observedNetworkKey = networkKey,
+            previousObservedNetworkKey = networkKey,
+        )
+
+        assertFalse(decision.scheduleRestart)
+        assertEquals("observed_network_identity_unchanged", decision.summary)
+    }
+
+    @Test
+    fun observedCapabilitiesWithIdentityChangeStillSchedulesRestart() {
+        val decision = NetworkChangeRestartPolicy.observedRestartEligibility(
+            event = "observed_capabilities_changed",
+            observedNetworkKey = "event=114,wifi,wlan0,192.168.1.103,8.8.8.8",
+            previousObservedNetworkKey = "event=113,cellular,rmnet0,10.0.0.2,8.8.8.8",
+        )
+
+        assertTrue(decision.scheduleRestart)
+    }
+
+    @Test
+    fun observedLinkPropertiesChangeSchedulesRestartEvenForKnownNetwork() {
+        val networkKey = "event=114,wifi,wlan0,192.168.1.103,8.8.8.8"
+
+        val decision = NetworkChangeRestartPolicy.observedRestartEligibility(
+            event = "observed_link_properties_changed",
+            observedNetworkKey = networkKey,
+            previousObservedNetworkKey = networkKey,
+        )
+
+        assertTrue(decision.scheduleRestart)
     }
 }

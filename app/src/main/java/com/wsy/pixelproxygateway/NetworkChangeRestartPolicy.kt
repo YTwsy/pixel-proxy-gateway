@@ -40,6 +40,26 @@ object NetworkChangeRestartPolicy {
     fun restartReason(trigger: String, sequence: Long, summary: String): String {
         return "network_change:$trigger seq=$sequence $summary".take(180)
     }
+
+    fun observedRestartEligibility(
+        event: String,
+        observedNetworkKey: String,
+        previousObservedNetworkKey: String?,
+    ): ObservedNetworkRestartEligibility {
+        val unchangedNetwork = previousObservedNetworkKey != null &&
+            observedNetworkKey == previousObservedNetworkKey
+        if (event == "observed_capabilities_changed" && unchangedNetwork) {
+            return ObservedNetworkRestartEligibility(
+                scheduleRestart = false,
+                summary = "observed_network_identity_unchanged",
+            )
+        }
+
+        return ObservedNetworkRestartEligibility(
+            scheduleRestart = true,
+            summary = "restart eligible",
+        )
+    }
 }
 
 enum class NetworkChangeRestartAction {
@@ -50,5 +70,10 @@ enum class NetworkChangeRestartAction {
 
 data class NetworkChangeRestartDecision(
     val action: NetworkChangeRestartAction,
+    val summary: String,
+)
+
+data class ObservedNetworkRestartEligibility(
+    val scheduleRestart: Boolean,
     val summary: String,
 )
