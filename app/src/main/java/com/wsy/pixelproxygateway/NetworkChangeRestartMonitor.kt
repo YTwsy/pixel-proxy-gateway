@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.util.concurrent.ScheduledExecutorService
@@ -24,26 +25,50 @@ class NetworkChangeRestartMonitor(
     private val connectivityManager = appContext.getSystemService(ConnectivityManager::class.java)
     private val lock = Any()
     private var registered = false
+    private var defaultCallbackRegistered = false
+    private var observedCallbackRegistered = false
     private var pendingRestart: ScheduledFuture<*>? = null
     private var eventSequence = 0L
     private var lastRestartAtMillis = 0L
     private var lastRestartNetworkKey = ""
 
-    private val callback = object : ConnectivityManager.NetworkCallback() {
+    private val defaultNetworkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            recordNetworkEvent("available", network)
+            recordNetworkEvent("default_available", network)
         }
 
         override fun onLost(network: Network) {
-            recordNetworkEvent("lost", network)
+            recordNetworkEvent("default_lost", network)
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            recordNetworkEvent("capabilities_changed", network)
+            recordNetworkEvent("default_capabilities_changed", network)
         }
 
         override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
-            recordNetworkEvent("link_properties_changed", network)
+            recordNetworkEvent("default_link_properties_changed", network)
+        }
+    }
+
+    private val observedNetworkRequest = NetworkRequest.Builder()
+        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        .build()
+
+    private val observedNetworkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            recordObservedNetworkEvent("observed_available", network)
+        }
+
+        override fun onLost(network: Network) {
+            recordObservedNetworkEvent("observed_lost", network)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            recordObservedNetworkEvent("observed_capabilities_changed", network)
+        }
+
+        override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+            recordObservedNetworkEvent("observed_link_properties_changed", network)
         }
     }
 
@@ -68,13 +93,16 @@ class NetworkChangeRestartMonitor(
         }
         logStore.append("app", "network restart monitor start ${snapshot.summary}")
         runCatching {
-            connectivityManager.registerDefaultNetworkCallback(callback)
+            connectivityManager.registerDefaultNetworkCallback(defaultNetworkCallback)
+            synchronized(lock) {
+                defaultCallbackRegistered = true
+            }
         }.getOrElse {
             synchronized(lock) {
                 registered = false
             }
             val message = it.message ?: it.javaClass.simpleName
-            logStore.append("app", "network restart monitor registration failed error=$message")
+            logStore.append("app", "network restart monitor default registration failed error=$message")
             statusStore.update { status ->
                 status.copy(
                     lastNetworkEventAt = TimeUtil.now(),
@@ -83,25 +111,55 @@ class NetworkChangeRestartMonitor(
                     lastError = "network monitor registration failed: $message",
                 )
             }
+            return
+        }
+
+        runCatching {
+            connectivityManager.registerNetworkCallback(observedNetworkRequest, observedNetworkCallback)
+            synchronized(lock) {
+                observedCallbackRegistered = true
+            }
+        }.getOrElse {
+            val message = it.message ?: it.javaClass.simpleName
+            logStore.append("app", "network restart monitor observed registration failed error=$message")
+            statusStore.update { status ->
+                status.copy(
+                    lastNetworkEventAt = TimeUtil.now(),
+                    lastNetworkEvent = "monitor_observed_registration_failed",
+                    lastNetworkSummary = message,
+                    lastError = "observed network monitor registration failed: $message",
+                )
+            }
         }
     }
 
     fun stop() {
-        val shouldUnregister = synchronized(lock) {
+        val callbacksToUnregister = synchronized(lock) {
             pendingRestart?.cancel(false)
             pendingRestart = null
-            if (registered) {
-                registered = false
-                true
-            } else {
-                false
-            }
+            val callbacks = RegisteredCallbacks(
+                defaultNetwork = defaultCallbackRegistered,
+                observedNetwork = observedCallbackRegistered,
+            )
+            defaultCallbackRegistered = false
+            observedCallbackRegistered = false
+            registered = false
+            callbacks
         }
-        if (shouldUnregister) {
-            runCatching { connectivityManager.unregisterNetworkCallback(callback) }
-                .onFailure { logStore.append("app", "network restart monitor unregister failed error=${it.message}") }
+        if (callbacksToUnregister.defaultNetwork) {
+            runCatching { connectivityManager.unregisterNetworkCallback(defaultNetworkCallback) }
+                .onFailure { logStore.append("app", "network restart monitor default unregister failed error=${it.message}") }
+        }
+        if (callbacksToUnregister.observedNetwork) {
+            runCatching { connectivityManager.unregisterNetworkCallback(observedNetworkCallback) }
+                .onFailure { logStore.append("app", "network restart monitor observed unregister failed error=${it.message}") }
         }
         logStore.append("app", "network restart monitor stop")
+    }
+
+    private fun recordObservedNetworkEvent(event: String, network: Network) {
+        if (network == connectivityManager.activeNetwork) return
+        recordNetworkEvent(event, network)
     }
 
     private fun recordNetworkEvent(event: String, network: Network) {
@@ -127,7 +185,7 @@ class NetworkChangeRestartMonitor(
             )
         }
 
-        if (event == "lost") {
+        if (event == "default_lost") {
             cancelPendingRestart("network_lost seq=$sequence")
             onStatusChanged()
             return
@@ -243,14 +301,34 @@ class NetworkChangeRestartMonitor(
         val activeId = active?.toString() ?: "none"
         val hasActiveInternetNetwork = active != null &&
             capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        val eventPart = eventNetwork?.let { "eventNetwork=$it " }.orEmpty()
+        val eventDetail = eventNetwork?.let { networkDetail("event", it) }
+        val eventPart = eventDetail?.let { "${it.summary} " }.orEmpty()
         val summary = eventPart +
             "active=$activeId " +
             "transports=$transports " +
             "capabilities=${capabilitiesSummary(capabilities)} " +
             link.summary
-        val key = listOf(activeId, transports, link.interfaceName, link.ipv4, link.dns).joinToString("|")
+        val key = listOf(
+            activeId,
+            transports,
+            link.interfaceName,
+            link.ipv4,
+            link.dns,
+            eventDetail?.key ?: "event=none",
+        ).joinToString("|")
         return NetworkSnapshot(summary = summary, key = key, hasActiveInternetNetwork = hasActiveInternetNetwork)
+    }
+
+    private fun networkDetail(label: String, network: Network): NetworkDetail {
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+        val link = linkSummary(connectivityManager.getLinkProperties(network))
+        val transports = transportsSummary(capabilities)
+        val capabilitiesText = capabilitiesSummary(capabilities)
+        val summary = "$label=$network ${label}Transports=$transports " +
+            "${label}Capabilities=$capabilitiesText ${label}If=${link.interfaceName} " +
+            "${label}Ipv4=${link.ipv4} ${label}Dns=${link.dns}"
+        val key = "$label=$network,$transports,${link.interfaceName},${link.ipv4},${link.dns}"
+        return NetworkDetail(summary = summary, key = key)
     }
 
     private fun transportsSummary(capabilities: NetworkCapabilities?): String {
@@ -314,6 +392,16 @@ class NetworkChangeRestartMonitor(
         val summary: String,
         val key: String,
         val hasActiveInternetNetwork: Boolean,
+    )
+
+    private data class NetworkDetail(
+        val summary: String,
+        val key: String,
+    )
+
+    private data class RegisteredCallbacks(
+        val defaultNetwork: Boolean,
+        val observedNetwork: Boolean,
     )
 
     private data class LinkSnapshot(
