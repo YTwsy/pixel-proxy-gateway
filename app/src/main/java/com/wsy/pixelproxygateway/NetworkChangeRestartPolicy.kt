@@ -3,7 +3,7 @@ package com.wsy.pixelproxygateway
 import java.util.concurrent.TimeUnit
 
 object NetworkChangeRestartPolicy {
-    const val RESTART_DELAY_SECONDS = 8L
+    const val RESTART_DELAY_SECONDS = 3L
     const val RESTART_COOLDOWN_SECONDS = 30L
 
     fun decide(

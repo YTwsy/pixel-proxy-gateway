@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -387,6 +388,12 @@ class ProxyForegroundService : Service() {
             Intent(this, ProxyForegroundService::class.java).setAction(Actions.REPOST_NOTIFICATION),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val restartPending = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, ProxyForegroundService::class.java).setAction(Actions.RESTART),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val listeners = notificationListenerSummary()
         val text = if (status.proxyRunning && status.portOk && status.requestOk) {
             "$listeners; health ok"
@@ -410,6 +417,13 @@ class ProxyForegroundService : Service() {
             .setCategory(Notification.CATEGORY_SERVICE)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setShowWhen(false)
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, R.drawable.ic_notification_proxy_small),
+                    "Restart",
+                    restartPending,
+                ).build(),
+            )
             .build()
         if (keepNotification) {
             notification.flags = notification.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
