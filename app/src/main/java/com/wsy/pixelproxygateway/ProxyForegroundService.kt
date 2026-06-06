@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -400,6 +401,7 @@ class ProxyForegroundService : Service() {
         val keepNotification = shouldKeepNotification(status)
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_proxy)
+            .setLargeIcon(Icon.createWithResource(this, R.drawable.ic_notification_proxy_large))
             .setContentTitle("Pixel Proxy Gateway")
             .setContentText(text)
             .setOnlyAlertOnce(true)
