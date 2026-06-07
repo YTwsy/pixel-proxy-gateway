@@ -1,6 +1,8 @@
 # Pixel Proxy Gateway
 
-[English](README.md) | **中文**
+[English](README.en.md) | **中文**
+
+> 默认中文 README 现在位于 [README.md](README.md)。本文件保留用于旧链接兼容。
 
 ## 概览
 

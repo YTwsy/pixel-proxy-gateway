@@ -1,140 +1,186 @@
-# Pixel Proxy Gateway
+<p align="center">
+  <img src="./app/src/main/res/drawable-nodpi/ic_launcher_phone_gateway_preview.png" width="128" alt="Pixel Proxy Gateway App Icon">
+</p>
 
-**English** | [中文](README.zh-CN.md)
+<h1 align="center">Pixel Proxy Gateway</h1>
 
-## Overview
+<p align="center">
+  把运行 VPN 的 Android 手机变成稳定、可观测、可自恢复的局域网 HTTP/SOCKS 代理网关。
+</p>
 
-Pixel Proxy Gateway is a single sideloaded Android app for turning an Android phone running a VPN, such as the built-in Google VPN on Pixel devices or Clash Meta, into a supervised LAN HTTP/SOCKS proxy endpoint.
+<p align="center">
+  <strong>中文</strong> ·
+  <a href="README.en.md">English</a> ·
+  <a href="https://github.com/YTwsy/pixel-proxy-gateway">官网</a> ·
+  <a href="https://github.com/YTwsy/pixel-proxy-gateway/releases/latest">下载 APK</a> ·
+  <a href="docs/adb.md">ADB 文档</a> ·
+  <a href="https://github.com/YTwsy/pixel-proxy-gateway/issues">问题反馈</a>
+</p>
 
-The app intentionally does not implement Android `VpnService`; the phone-side VPN keeps the system VPN slot. Pixel Proxy Gateway runs as a normal Android app: it listens on proxy ports and makes outbound connections from the app process on the phone.
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/YTwsy/pixel-proxy-gateway?display_name=tag&sort=semver" alt="GitHub release">
+  <img src="https://img.shields.io/badge/Android-10%2B-3DDC84?logo=android&logoColor=white" alt="Android 10+">
+  <img src="https://img.shields.io/badge/GOST-v3.2.6-2f7cf6" alt="GOST v3.2.6">
+  <img src="https://img.shields.io/badge/APK-sideload-blue" alt="Sideload APK">
+</p>
 
-## Why This Project
+## 截图
 
-- **GOST-powered:** the proxy engine is a pinned, source-built GOST binary packaged with the APK and verified before launch.
-- **Built for long-running stability:** the app includes a foreground service, wake lock, process supervisor, port watchdog, request watchdog, rotating logs, boot/upgrade restore, and ADB diagnostics.
-- **Stable Every Proxy alternative:** for always-on LAN proxy gateway use, it is designed to be more stable and diagnosable than lightweight proxy-sharing apps such as Every Proxy, while remaining open-source, free, and ad-free.
-- **Operationally visible:** status, logs, health checks, listener state, and recovery behavior are exposed for troubleshooting instead of being hidden behind a minimal UI.
+<table align="center">
+  <tr>
+    <td align="center" width="240">
+      <img src="./docs/assets/screenshots/app-overview.png" width="220" alt="Pixel Proxy Gateway 主界面">
+      <br><strong>主界面</strong>
+    </td>
+    <td align="center" width="240">
+      <img src="./docs/assets/screenshots/app-settings-status.png" width="220" alt="Pixel Proxy Gateway 配置与状态">
+      <br><strong>配置与状态</strong>
+    </td>
+    <td align="center" width="240">
+      <img src="./docs/assets/screenshots/notification-restart.png" width="220" alt="Pixel Proxy Gateway 通知重启">
+      <br><strong>通知重启</strong>
+    </td>
+  </tr>
+</table>
 
-## Classic Use Case
+## 概览
 
-A common topology is to use the Android phone as the upstream VPN egress. Other devices can point directly to the phone's proxy ports. If split routing is needed, a computer can sit in the middle as the LAN policy router, using `mihomo` rules or PAC.
+Pixel Proxy Gateway 是一个单 APK、侧载安装的 Android 应用，用来把运行 VPN 的 Android 手机变成一个受监控的局域网 HTTP/SOCKS 代理出口，例如运行 Pixel 自带的 Google VPN，或 Clash Meta 等手机侧 VPN。以提供稳定，不易封号的可以使用Claude，GPT的网络。
 
-**Phone A, usually a Pixel or another Android phone:**
+本应用有意不实现 Android `VpnService`，这样手机侧 VPN 可以继续占用系统 VPN 槽位。Pixel Proxy Gateway 作为一个普通 Android 应用运行：它在手机上监听代理端口，并从手机上的应用进程发起出站连接。
 
-- A phone-side VPN is enabled, such as Clash Meta or the built-in Google VPN on supported Pixel devices.
-- Pixel Proxy Gateway opens HTTP and SOCKS ports for LAN access.
+不需要任何背景知识，只需要阅读下面的经典使用场景，从右侧release下载apk安装，点击start即可使用，本应用界面简洁美观，易于操作。
 
-**Computer B:**
+## 为什么做这个项目
 
-- `mihomo` runs with `mixed-port` and `allow-lan`.
-- Phone A's Pixel Proxy Gateway endpoint is configured as an outbound proxy, for example `phoneA`.
-- Rules send overseas or selected domains to `phoneA`.
-- Domestic, LAN, and private ranges stay `DIRECT`.
-- A PAC file can also be used when that is a better fit for the client side.
+- **基于 GOST：** 代理引擎是固定版本、从源码构建的 GOST 二进制，并随 APK 打包，启动前会做校验。
+- **面向长期稳定运行：** 应用内置前台服务、wake lock、进程监管、端口 watchdog、请求 watchdog、日志轮转、开机/升级恢复和 ADB 诊断。
+- **稳定的 Every Proxy 替代方案：** 对于常驻局域网代理网关场景，本项目目标是比 Every Proxy 这类轻量代理共享应用更稳定、更可诊断，同时保持开源、免费、无广告。
+- **可观测、可排障：** 状态、日志、健康检查、监听器状态和恢复行为都可以查看，而不是被藏在一个很轻量但不透明的界面后面。
+  > 另一个重要的原因是为了能在不支持的地区使用先进但容易封号的 AI 服务，如 Claude, GPT 等。机场节点容易被封号或是降智一直以来都是部分地区用户十分头疼的问题，好消息是 Google Pixel 手机内置的 Google VPN 可以提供纯净的 Google LLC 节点，能够帮助手机全速，安全的使用 AI 服务，本项目的初衷即是为了将这个能力共享到 LAN 下的其他设备而不仅限于手机。
 
-**Other devices:**
+## 典型使用场景
 
-- Their proxy or PAC settings can point to Computer B.
-- In simpler setups, they can point directly to Phone A's Pixel Proxy Gateway ports.
+一个经典拓扑是：让 Android 手机作为上游 VPN 出口，其他设备可以直接把代理指向这台手机。如果需要实现规则分流，可以让一台电脑作为局域网内的分流节点，例如使用 `mihomo` 规则或 PAC，其他设备再把代理或 PAC 指向这台电脑。
 
-On supported Google Pixel devices and account environments, the built-in Google VPN can be used as the phone-side upstream path. Initial activation or re-verification may still need a network path that can complete Google's service verification; mobile data, eSIM, or another already trusted network path is often the least fussy way to complete that first handshake. After that, this project only exposes the phone's app-level proxy endpoint and does not replace or implement the VPN itself.
+**手机 A，通常是 Pixel 或其他 Android 手机：**
 
-## Related Use Cases And Search Keywords
+- 手机侧 VPN 已开启，例如 Clash Meta，或支持机型上的 Google VPN。
+- Pixel Proxy Gateway 打开 HTTP 和 SOCKS 端口，供局域网设备访问。
 
-Pixel Proxy Gateway is relevant to: Android HTTP proxy, Android SOCKS5 proxy, phone as proxy gateway, Android VPN to LAN proxy, Pixel Google VPN proxy, Clash Meta proxy sharing, GOST Android proxy, Every Proxy alternative, open-source ad-free Android proxy, mihomo upstream proxy, LAN proxy sharing, PAC proxy gateway, phone VPN to LAN proxy, and supervised mobile proxy endpoint.
+**电脑 B：**
 
-## Defaults
+- `mihomo` 开启 `mixed-port` 和 `allow-lan`。
+- 把手机 A 上的 Pixel Proxy Gateway 配成一个 outbound proxy，例如 `phoneA`。
+- 规则里让国外或指定域名走 `phoneA`。
+- 国内、局域网和 private 地址保持 `DIRECT`。
+- 如果客户端更适合自动代理，也可以使用 PAC。
 
-| Item | Value |
-| --- | --- |
-| Package | `com.wsy.pixelproxygateway` |
-| HTTP | `0.0.0.0:8080` |
-| SOCKS5 | `0.0.0.0:1080` |
-| Authentication | Supported, disabled by default |
-| Health check | `https://connectivitycheck.gstatic.com/generate_204` |
-| GOST tag | `v3.2.6` |
-| GOST commit | `340ba32ef0bebc7293908007cc423dd5f33dd88c` |
+**其他设备：**
 
-## Stability V1
+- 代理或 PAC 可以指向电脑 B。
+- 在更简单的场景中，也可以直接指向手机 A 上的 Pixel Proxy Gateway 端口。
 
-The first usable version includes the stability layer directly:
+> 在支持的 Google Pixel 机型和账号环境下，可以使用随 Pixel 提供的 Google VPN 作为手机侧上游路径。初次启用或重新验证时，网络需要能完成 Google 服务验证；移动数据、eSIM，或者另一条已经可信的网络路径，通常更容易完成这一步握手。之后，本项目只负责暴露手机应用层的代理端口，并不替代或实现 VPN 本身。
 
-- Foreground service with `specialUse` declaration and persistent notification.
-- Wake lock while the proxy is enabled.
-- GOST process supervisor with automatic restart and backoff.
-- Port watchdog for HTTP/SOCKS listeners.
-- Request watchdog through the local proxy with consecutive-failure threshold.
-- Runtime status freshness timestamps with Pixel-clock stale-status checks in ADB tooling.
-- Rotating app and GOST logs.
-- Crash, post-unlock boot, and APK-replace restore from persisted config.
-- ADB control and status export via `dumpsys` and content provider.
+## 相关需求和搜索关键词
 
-## Build GOST
+Pixel Proxy Gateway 适合这些需求：Android HTTP 代理、Android SOCKS5 代理、手机代理网关、Android VPN 转局域网代理、Pixel Google VPN 代理、Clash Meta 代理共享、GOST Android 代理、Every Proxy 替代方案、开源无广告 Android 代理、mihomo 上游代理、局域网代理共享、PAC 代理网关、手机 VPN 转局域网代理、可监管的移动代理出口。
 
-The APK expects the pinned GOST executable to be packaged as an extracted native library:
+## 默认配置
+
+
+| 项目      | 值                                                    |
+| ------- | ---------------------------------------------------- |
+| 包名      | `com.wsy.pixelproxygateway`                          |
+| HTTP    | `0.0.0.0:8080`                                       |
+| SOCKS5  | `0.0.0.0:1080`                                       |
+| 认证      | 支持，默认关闭                                              |
+| 健康检查    | `https://connectivitycheck.gstatic.com/generate_204` |
+| GOST 标签 | `v3.2.6`                                             |
+| GOST 提交 | `340ba32ef0bebc7293908007cc423dd5f33dd88c`           |
+
+
+## 稳定性 V1
+
+第一个可用版本已经直接包含稳定性增强层：
+
+- 前台服务，包含 `specialUse` 声明和持续通知。
+- 代理启用期间保持 wake lock。
+- GOST 进程监管，支持自动重启和退避。
+- HTTP/SOCKS 监听端口 watchdog。
+- 通过本地代理发起请求检查，并按连续失败阈值判断异常。
+- 运行状态带新鲜度时间戳，ADB 工具会按 Pixel 设备时钟检查状态是否过期。
+- 应用日志和 GOST 日志自动轮转。
+- 支持崩溃后、解锁后开机、APK 覆盖安装后的配置恢复。
+- 支持通过 `dumpsys` 和 content provider 做 ADB 控制与状态导出。
+
+## 构建 GOST
+
+APK 期望把固定版本的 GOST 可执行文件打包成可提取的 native library：
 
 ```text
 app/src/main/jniLibs/arm64-v8a/libgost.so
 ```
 
-Build it from source:
+从源码构建：
 
 ```sh
 tools/build-gost-android-arm64.sh
 ```
 
-This requires `go` and network access for the first source checkout. The script writes:
+首次拉取源码时需要 `go` 和网络访问。脚本会写入：
 
 - `app/src/main/jniLibs/arm64-v8a/libgost.so`
 - `app/src/main/assets/gost/android-arm64/gost.sha256`
 - `app/src/main/assets/gost/android-arm64/gost.tag`
 - `app/src/main/assets/gost/android-arm64/gost.commit`
 
-The build script pins both the stable tag and the expected commit. If `v3.2.6` ever resolves to a different commit, the script refuses to build.
+构建脚本同时固定 stable tag 和预期 commit。如果 `v3.2.6` 将来解析到不同提交，脚本会拒绝构建。
 
-Verify the current local source checkout, pre-APK binary, and metadata without rebuilding:
+在不重新构建的情况下校验当前本地源码、APK 打包前的二进制和元数据：
 
 ```sh
 scripts/verify_gost_provenance.sh
 ```
 
-The app executes GOST from Android's `nativeLibraryDir`, not from writable app data. This matters on Android 10+ because target API 29+ apps cannot directly execute files from their writable app home directory. The app verifies `gost.sha256` before starting the native binary.
+应用会从 Android 的 `nativeLibraryDir` 执行 GOST，而不是从可写 app data 目录执行。这对 Android 10+ 很重要，因为 target API 29+ 的应用不能直接执行自身可写目录里的文件。启动 native binary 前，应用会先校验 `gost.sha256`。
 
-## Build APK
+## 构建 APK
 
-Build the debug APK:
+构建 debug APK：
 
 ```sh
 ./gradlew :app:assembleDebug
 ```
 
-Current debug APK path:
+当前 debug APK 路径：
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Verify APK packaging and embedded GOST provenance:
+校验 APK 打包内容和内置 GOST 来源：
 
 ```sh
 scripts/verify_apk.sh
 ```
 
-`verify_apk.sh` requires Android `aapt` by default so the APK package metadata and stability-critical manifest entries are actually checked. Set `ALLOW_MISSING_AAPT=true` only when you deliberately want a lightweight asset/provenance check.
+`verify_apk.sh` 默认需要 Android `aapt`，这样才能真正检查 APK package 元数据和稳定性关键的 manifest 条目。只有在你明确只想做轻量级 asset/provenance 检查时，才设置 `ALLOW_MISSING_AAPT=true`。
 
-Run the full host-side preflight bundle before attaching the Pixel:
+连接 Pixel 前，先运行完整的主机侧预检：
 
 ```sh
 scripts/host_preflight.sh
 ```
 
-This writes `reports/host-preflight-*` with shell syntax checks, status parser self-test, ADB start guard self-test, LAN smoke strict-assertion self-test, Gradle build/lint/unit-test, APK packaging plus stability-critical manifest checks, GOST provenance, ADB device status, and a short device-validation checklist.
+该命令会写入 `reports/host-preflight-*`，内容包括 shell 语法检查、状态解析器自测、ADB 启动防护自测、LAN smoke 严格断言自测、Gradle build/lint/unit-test、APK 打包与稳定性关键 manifest 检查、GOST 来源校验、ADB 设备状态，以及简短的设备验证清单。
 
-## Release APK
+## 发布 APK
 
-GitHub Actions builds a signed APK when a `v*` tag is pushed, then uploads the APK and SHA256 file to the GitHub Release.
+GitHub Actions 会在推送 `v*` tag 时构建已签名 APK，并把 APK 和 SHA256 文件上传到 GitHub Release。
 
-Before the first release, generate a long-lived release signing key locally:
+首次发布前，在本机生成长期保存的 release 签名 key：
 
 ```sh
 keytool -genkeypair -v \
@@ -145,36 +191,36 @@ keytool -genkeypair -v \
   -validity 10000
 ```
 
-Do not commit `release.jks`. Convert it to one-line base64, then paste it into the GitHub repository under `Settings` -> `Secrets and variables` -> `Actions`:
+不要提交 `release.jks`。把它转成一行 base64 后，填到 GitHub 仓库的 `Settings` -> `Secrets and variables` -> `Actions`：
 
 ```sh
 base64 -i release.jks | tr -d '\n' | pbcopy
 ```
 
-Add these repository secrets:
+需要添加这些 repository secrets：
 
-- `ANDROID_KEYSTORE_BASE64`: the base64 value copied above
-- `ANDROID_KEYSTORE_PASSWORD`: keystore password
-- `ANDROID_KEY_ALIAS`: for example `pixel-proxy-gateway`
-- `ANDROID_KEY_PASSWORD`: key password; leave it empty when it matches the keystore password
+- `ANDROID_KEYSTORE_BASE64`: 上面复制的 base64 内容
+- `ANDROID_KEYSTORE_PASSWORD`: keystore 密码
+- `ANDROID_KEY_ALIAS`: 例如 `pixel-proxy-gateway`
+- `ANDROID_KEY_PASSWORD`: key 密码；如果和 keystore 密码相同，可以留空
 
-To publish a new version, first update `versionName` and `versionCode` in `app/build.gradle`, then push a tag:
+发布新版本时，先确认 `app/build.gradle` 里的 `versionName` 和 `versionCode` 已更新，然后推送 tag：
 
 ```sh
 git tag -a v1.0 -m "Pixel Proxy Gateway v1.0"
 git push origin v1.0
 ```
 
-After Actions completes, the Release page will include:
+Actions 完成后，Release 页面会出现：
 
 ```text
 pixel-proxy-gateway-v1.0.apk
 pixel-proxy-gateway-v1.0.apk.sha256
 ```
 
-## Install And Control
+## 安装与控制
 
-Install and start:
+安装并启动：
 
 ```sh
 scripts/adb_install_debug.sh
@@ -182,102 +228,102 @@ scripts/adb_bootstrap.sh
 scripts/adb_start.sh
 ```
 
-One-shot device-side verification after connecting the Pixel:
+连接 Pixel 后执行一次性设备侧验证：
 
 ```sh
 scripts/adb_verify_device.sh
 ```
 
-End-to-end acceptance check:
+端到端验收检查：
 
 ```sh
 scripts/acceptance_check.sh
 ```
 
-Verify in-app restart recovery by killing the GOST child process:
+杀掉 GOST 子进程，验证应用内重启恢复：
 
 ```sh
 scripts/adb_fault_inject.sh
 ```
 
-Override ports from ADB:
+通过 ADB 覆盖端口：
 
 ```sh
 HTTP_PORT=18080 SOCKS_PORT=11080 BIND_ADDRESS=0.0.0.0 scripts/adb_start.sh
 ```
 
-Enable auth from ADB:
+通过 ADB 启用认证：
 
 ```sh
 AUTH_ENABLED=true USERNAME=myuser PASSWORD=mypass scripts/adb_start.sh
 ```
 
-Status:
+查看状态：
 
 ```sh
 scripts/adb_status.sh
 ```
 
-Collect a full diagnostic bundle if a device-side check fails:
+如果设备侧检查失败，收集完整诊断包：
 
 ```sh
 scripts/adb_collect_diagnostics.sh
 ```
 
-LAN/proxy egress smoke test from the Mac or another LAN client:
+从 Mac 或其他局域网客户端执行 LAN/proxy 出口 smoke test：
 
 ```sh
 PIXEL_IP=<pixel-lan-ip> scripts/lan_smoke.sh
 ```
 
-Make the egress proof strict when you know the expected Google VPN exit IP:
+如果已知预期的 Google VPN 出口 IP，可以让出口验证变成严格断言：
 
 ```sh
 EXPECTED_PROXY_IP=<google-vpn-exit-ip> PIXEL_IP=<pixel-lan-ip> scripts/lan_smoke.sh
 ```
 
-When the Mac is not expected to share the same exit, `REQUIRE_PROXY_DIFF_FROM_DIRECT=true` also fails the smoke test if the proxy public IP equals the direct public IP.
+当 Mac 不应与代理使用同一出口时，可以设置 `REQUIRE_PROXY_DIFF_FROM_DIRECT=true`；如果代理公网 IP 与直连公网 IP 相同，smoke test 会失败。
 
-Stop or restart:
+停止或重启：
 
 ```sh
 scripts/adb_stop.sh
 scripts/adb_restart.sh
 ```
 
-## Real-Device Validation
+## 真机验证
 
-Google VPN routing and overnight stability must be validated on the Pixel:
+Google VPN 路由和过夜稳定性必须在 Pixel 真机上验证：
 
-1. Run `scripts/host_preflight.sh`.
-2. Connect the Pixel, allow USB debugging, and run `scripts/acceptance_check.sh`.
-3. Open Android battery settings and set Pixel Proxy Gateway to Unrestricted if the script warns about battery optimization.
-4. Confirm the LAN smoke step reports proxy public IPs matching the expected Google VPN exit, or set `EXPECTED_PROXY_IP=<google-vpn-exit-ip>` to make the check fail automatically on mismatch.
-5. From a LAN client, use `http://<pixel-ip>:8080` or `socks5h://<pixel-ip>:1080`.
-6. Lock the phone and keep it charging overnight.
-7. Run `scripts/adb_status.sh` and inspect restart counts, failures, and logs.
-8. If anything is unclear, run `scripts/adb_collect_diagnostics.sh` and inspect the generated `reports/diagnostics-*` directory.
+1. 运行 `scripts/host_preflight.sh`。
+2. 连接 Pixel，允许 USB 调试，然后运行 `scripts/acceptance_check.sh`。
+3. 如果脚本提示电池优化风险，打开 Android 电池设置，将 Pixel Proxy Gateway 设为 Unrestricted。
+4. 确认 LAN smoke 步骤报告的代理公网 IP 与预期 Google VPN 出口一致；也可以设置 `EXPECTED_PROXY_IP=<google-vpn-exit-ip>`，让不匹配时自动失败。
+5. 从局域网客户端使用 `http://<pixel-ip>:8080` 或 `socks5h://<pixel-ip>:1080`。
+6. 锁屏并保持手机整夜充电。
+7. 运行 `scripts/adb_status.sh`，检查重启次数、失败记录和日志。
+8. 如有不清楚的地方，运行 `scripts/adb_collect_diagnostics.sh`，检查生成的 `reports/diagnostics-*` 目录。
 
-`acceptance_check.sh` runs APK packaging verification, ADB install/start verification, GOST process fault injection, and LAN smoke in one timestamped report under `reports/acceptance-*`. Set `RUN_LAN_SMOKE=false` to skip LAN egress during a USB-only check, `RUN_SUPERVISOR_SMOKE=true` to add a short ADB supervisor smoke run, or `RUN_REBOOT_RESTORE_CHECK=true` to include the opt-in phone reboot restore check.
+`acceptance_check.sh` 会把 APK 打包验证、ADB 安装/启动验证、GOST 进程故障注入和 LAN smoke 写入一个带时间戳的 `reports/acceptance-*` 报告。设置 `RUN_LAN_SMOKE=false` 可以在 USB-only 检查中跳过 LAN 出口验证；设置 `RUN_SUPERVISOR_SMOKE=true` 可以加入短时间 ADB supervisor smoke run；设置 `RUN_REBOOT_RESTORE_CHECK=true` 可以加入需要显式启用的手机重启恢复检查。
 
-If a device-side acceptance step fails, the script automatically writes a diagnostics bundle next to the step logs unless `COLLECT_DIAGNOSTICS_ON_FAILURE=false` is set.
+如果设备侧验收步骤失败，脚本会自动在对应步骤日志旁写入诊断包，除非设置了 `COLLECT_DIAGNOSTICS_ON_FAILURE=false`。
 
-The acceptance flow also reinstalls the APK once to verify `MY_PACKAGE_REPLACED` restore from persisted config. Set `RUN_RESTORE_CHECK=false` to skip that upgrade-restore check. Full device reboot restore is intentionally treated as post-unlock `BOOT_COMPLETED`, because this app stores its configuration in normal credential-protected app storage rather than Direct Boot storage. Run `scripts/adb_reboot_restore_check.sh` when you want to prove that path explicitly.
+验收流程还会重新安装一次 APK，用来验证 `MY_PACKAGE_REPLACED` 后能从持久化配置恢复。设置 `RUN_RESTORE_CHECK=false` 可以跳过该升级恢复检查。完整设备重启恢复被有意视为解锁后的 `BOOT_COMPLETED` 路径，因为应用配置存放在普通 credential-protected app storage 中，而不是 Direct Boot storage。需要显式验证该路径时，运行 `scripts/adb_reboot_restore_check.sh`。
 
-## Overnight Runs
+## 过夜运行
 
-For a scripted overnight run while the Pixel stays connected to ADB:
+Pixel 保持 ADB 连接时，可以使用脚本化过夜运行：
 
 ```sh
 DURATION_SECONDS=28800 INTERVAL_SECONDS=300 PIXEL_IP=<pixel-ip> scripts/stability_monitor.sh
 ```
 
-This writes timestamped samples under `reports/` with ADB status, listener state, GOST pid, and optional LAN smoke results. The summary includes `statusAgeSeconds`; samples whose status is stale or unreadable are marked with `adb_exit=1`.
+该命令会在 `reports/` 下写入带时间戳的采样结果，包括 ADB 状态、监听器状态、GOST pid，以及可选 LAN smoke 结果。摘要包含 `statusAgeSeconds`；状态过期或不可读的样本会标记为 `adb_exit=1`。
 
-For an ADB-connected overnight run with last-resort recovery if the service stops reporting healthy state:
+如果 Pixel 保持 ADB 连接，并且希望服务停止报告健康状态时有最后兜底恢复层：
 
 ```sh
 DURATION_SECONDS=28800 CHECK_INTERVAL_SECONDS=60 PIXEL_IP=<pixel-ip> scripts/adb_supervise.sh
 ```
 
-This app can self-recover from process, port, and request failures. `adb_supervise.sh` is deliberately outside the app and should be treated as the last-resort recovery layer for Android service state, background policy, or Google VPN/radio states that the in-app GOST watchdog cannot repair by itself. The supervisor also treats stale status older than `STATUS_MAX_AGE_SECONDS` (default `120`) as unhealthy before recovery counting.
+应用本身可以从进程、端口和请求失败中自恢复。`adb_supervise.sh` 刻意放在应用外部，应被视为最后兜底恢复层，用来处理 Android 服务状态、后台策略、Google VPN/radio 状态等应用内 GOST watchdog 无法自行修复的问题。supervisor 在计数恢复前，也会把超过 `STATUS_MAX_AGE_SECONDS`（默认 `120`）的过期状态视为不健康。
