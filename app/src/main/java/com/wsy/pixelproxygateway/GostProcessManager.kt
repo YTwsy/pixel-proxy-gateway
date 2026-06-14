@@ -1,5 +1,6 @@
 package com.wsy.pixelproxygateway
 
+import android.os.Process as AndroidProcess
 import android.content.Context
 import java.io.File
 import java.util.concurrent.Executors
@@ -22,7 +23,8 @@ class GostProcessManager(
     @Volatile private var process: Process? = null
     @Volatile private var desiredRunning = false
     @Volatile private var restartFuture: ScheduledFuture<*>? = null
-    @Volatile private var restartDelaySeconds = 5L
+    @Volatile private var restartDelaySeconds = RestartDelayPolicy.INITIAL_DELAY_SECONDS
+    @Volatile private var restartDelayResetFuture: ScheduledFuture<*>? = null
     @Volatile private var config: ProxyConfig = ProxyConfig()
 
     @Synchronized
@@ -51,10 +53,7 @@ class GostProcessManager(
         if (isRunning()) {
             if (configChanged) {
                 logStore.append("app", "gost restart requested reason=start_config_changed:$reason")
-                stop("restart:start_config_changed:$reason")
-                desiredRunning = true
-                statusStore.update { it.copy(desiredRunning = true, lastRestartReason = "start_config_changed:$reason") }
-                scheduleRestart("start_config_changed:$reason", immediate = true)
+                restart(config, "start_config_changed:$reason")
             } else {
                 logStore.append("app", "gost start skipped reason=already_running")
             }
@@ -66,24 +65,18 @@ class GostProcessManager(
     @Synchronized
     fun stop(reason: String = "stop") {
         desiredRunning = false
-        restartFuture?.cancel(false)
-        restartFuture = null
+        cancelScheduledRestart()
+        val stopped = stopCurrentProcess(reason)
         val current = process
-        process = null
-        if (current != null) {
-            logStore.append("app", "stopping gost reason=$reason")
-            current.destroy()
-            runCatching {
-                if (!current.waitFor(3, TimeUnit.SECONDS)) current.destroyForcibly()
-            }
-        }
+        val currentPid = ProcessUtil.pidOf(current)
         statusStore.update {
             it.copy(
                 desiredRunning = false,
-                proxyRunning = false,
-                proxyPid = -1,
+                proxyRunning = !stopped && current?.isAlive == true,
+                proxyPid = if (!stopped && current?.isAlive == true) currentPid else -1,
                 lastStopAt = TimeUtil.now(),
                 lastRestartReason = reason,
+                lastError = if (stopped) it.lastError else "gost stop timed out:$reason",
             )
         }
     }
@@ -96,7 +89,6 @@ class GostProcessManager(
             rejectInvalidStart(error, reason)
             return
         }
-        stop("restart:$reason")
         desiredRunning = true
         statusStore.update {
             it.copy(
@@ -105,6 +97,11 @@ class GostProcessManager(
                 autoStart = config.autoStart,
                 lastRestartReason = reason,
             )
+        }
+        cancelScheduledRestart()
+        if (!stopCurrentProcess("restart:$reason")) {
+            scheduleRestart("restart_wait:$reason", immediate = false)
+            return
         }
         scheduleRestart(reason, immediate = true)
     }
@@ -128,6 +125,22 @@ class GostProcessManager(
     @Synchronized
     private fun startNow(reason: String) {
         runCatching {
+            process?.let { current ->
+                if (current.isAlive) {
+                    val pid = ProcessUtil.pidOf(current)
+                    logStore.append("app", "gost start deferred reason=$reason current_pid=$pid")
+                    statusStore.update {
+                        it.copy(proxyRunning = true, proxyPid = pid, lastError = "gost still stopping:$reason")
+                    }
+                    if (desiredRunning) scheduleRestart("start_deferred:$reason", immediate = false)
+                    return
+                }
+                process = null
+            }
+            if (!stopUntrackedGostProcesses("pre_start:$reason")) {
+                if (desiredRunning) scheduleRestart("stale_process:$reason", immediate = false)
+                return
+            }
             if (!config.enableHttp && !config.enableSocks) error("Both HTTP and SOCKS listeners are disabled")
             val binary = installer.ensureInstalled()
             GostConfigWriter.write(config, configFile)
@@ -138,7 +151,6 @@ class GostProcessManager(
                 .redirectErrorStream(true)
             val started = builder.start()
             process = started
-            restartDelaySeconds = 5L
             val pid = ProcessUtil.pidOf(started)
             logStore.append("app", "gost started pid=$pid reason=$reason")
             statusStore.update {
@@ -158,6 +170,7 @@ class GostProcessManager(
             }
             Thread({ pumpOutput(started) }, "gost-output").start()
             Thread({ waitForExit(started) }, "gost-wait").start()
+            scheduleRestartDelayReset(started)
         }.getOrElse { throwable ->
             val message = throwable.message ?: throwable.javaClass.simpleName
             logStore.append("app", "gost start failed error=$message")
@@ -231,8 +244,9 @@ class GostProcessManager(
     private fun scheduleRestart(reason: String, immediate: Boolean) {
         if (!desiredRunning) return
         if (restartFuture?.isDone == false) return
-        val delay = if (immediate) 0 else restartDelaySeconds
-        restartDelaySeconds = min(restartDelaySeconds * 2, 300)
+        val next = RestartDelayPolicy.next(restartDelaySeconds, immediate)
+        val delay = next.delaySeconds
+        restartDelaySeconds = next.nextDelaySeconds
         logStore.append("app", "scheduling gost restart reason=$reason delay=${delay}s")
         statusStore.update { it.copy(lastRestartReason = reason, lastError = reason) }
         restartFuture = supervisor.schedule({ runScheduledRestart(reason) }, delay, TimeUnit.SECONDS)
@@ -241,6 +255,12 @@ class GostProcessManager(
     @Synchronized
     private fun runScheduledRestart(reason: String) {
         restartFuture = null
+        process?.let { current ->
+            if (current.isAlive && !stopCurrentProcess("scheduled_restart:$reason")) {
+                if (desiredRunning) scheduleRestart("restart_wait:$reason", immediate = false)
+                return
+            }
+        }
         startNow(reason)
     }
 
@@ -248,4 +268,133 @@ class GostProcessManager(
         stop("service_destroy")
         supervisor.shutdownNow()
     }
+
+    private fun cancelScheduledRestart() {
+        restartFuture?.cancel(false)
+        restartFuture = null
+        restartDelayResetFuture?.cancel(false)
+        restartDelayResetFuture = null
+    }
+
+    private fun stopCurrentProcess(reason: String): Boolean {
+        val current = process ?: return true
+        val pid = ProcessUtil.pidOf(current)
+        if (!current.isAlive) {
+            process = null
+            return true
+        }
+
+        logStore.append("app", "stopping gost pid=$pid reason=$reason")
+        current.destroy()
+        var stopped = current.waitForExit(GOST_STOP_GRACE_SECONDS)
+        if (!stopped && current.isAlive) {
+            logStore.append("app", "gost stop timed out pid=$pid reason=$reason action=force")
+            current.destroyForcibly()
+            stopped = current.waitForExit(GOST_FORCE_STOP_GRACE_SECONDS)
+        }
+
+        if (stopped || !current.isAlive) {
+            if (process === current) process = null
+            return true
+        }
+
+        logStore.append("app", "gost still alive pid=$pid reason=$reason")
+        statusStore.update {
+            it.copy(proxyRunning = true, proxyPid = pid, lastError = "gost stop timed out:$reason")
+        }
+        return false
+    }
+
+    private fun stopUntrackedGostProcesses(reason: String): Boolean {
+        val trackedPid = ProcessUtil.pidOf(process).takeIf { it > 0 }
+        val stalePids = runningGostPids().filter { it != trackedPid }
+        if (stalePids.isEmpty()) return true
+
+        stalePids.forEach { pid ->
+            logStore.append("app", "stopping untracked gost pid=$pid reason=$reason")
+            runCatching { AndroidProcess.killProcess(pid.toInt()) }
+                .onFailure { logStore.append("app", "untracked gost kill failed pid=$pid error=${it.message}") }
+        }
+
+        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(GOST_FORCE_STOP_GRACE_SECONDS)
+        while (System.currentTimeMillis() < deadline) {
+            val remaining = runningGostPids().filter { it != trackedPid }
+            if (remaining.isEmpty()) return true
+            Thread.sleep(100)
+        }
+
+        val remaining = runningGostPids().filter { it != trackedPid }
+        if (remaining.isEmpty()) return true
+        val message = "untracked gost still running pids=${remaining.joinToString(",")}"
+        logStore.append("app", "$message reason=$reason")
+        statusStore.update { it.copy(lastError = message) }
+        return false
+    }
+
+    private fun runningGostPids(): List<Long> {
+        return GOST_PROCESS_NAMES
+            .flatMap { processName -> pidOf(processName) }
+            .distinct()
+    }
+
+    private fun pidOf(processName: String): List<Long> {
+        return runCatching {
+            val finder = ProcessBuilder("pidof", processName)
+                .redirectErrorStream(true)
+                .start()
+            val output = finder.inputStream.bufferedReader().readText()
+            if (!finder.waitFor(1, TimeUnit.SECONDS)) {
+                finder.destroyForcibly()
+                return@runCatching emptyList()
+            }
+            if (finder.exitValue() != 0) return@runCatching emptyList()
+            output.trim()
+                .split(Regex("\\s+"))
+                .mapNotNull { it.toLongOrNull() }
+                .filter { it > 0 }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun Process.waitForExit(timeoutSeconds: Long): Boolean {
+        return runCatching { waitFor(timeoutSeconds, TimeUnit.SECONDS) }.getOrDefault(false)
+    }
+
+    private fun scheduleRestartDelayReset(started: Process) {
+        restartDelayResetFuture?.cancel(false)
+        restartDelayResetFuture = supervisor.schedule({
+            synchronized(this) {
+                if (process === started && started.isAlive) {
+                    restartDelaySeconds = RestartDelayPolicy.INITIAL_DELAY_SECONDS
+                    logStore.append("app", "gost restart backoff reset pid=${ProcessUtil.pidOf(started)}")
+                }
+            }
+        }, RESTART_BACKOFF_RESET_SECONDS, TimeUnit.SECONDS)
+    }
+
+    companion object {
+        private val GOST_PROCESS_NAMES = listOf("libgost.so", "gost")
+        private const val GOST_STOP_GRACE_SECONDS = 3L
+        private const val GOST_FORCE_STOP_GRACE_SECONDS = 2L
+        private const val RESTART_BACKOFF_RESET_SECONDS = 30L
+    }
 }
+
+internal object RestartDelayPolicy {
+    const val INITIAL_DELAY_SECONDS = 5L
+    private const val MAX_DELAY_SECONDS = 300L
+
+    fun next(currentDelaySeconds: Long, immediate: Boolean): RestartDelay {
+        if (immediate) {
+            return RestartDelay(delaySeconds = 0, nextDelaySeconds = currentDelaySeconds)
+        }
+        return RestartDelay(
+            delaySeconds = currentDelaySeconds,
+            nextDelaySeconds = min(currentDelaySeconds * 2, MAX_DELAY_SECONDS),
+        )
+    }
+}
+
+internal data class RestartDelay(
+    val delaySeconds: Long,
+    val nextDelaySeconds: Long,
+)
