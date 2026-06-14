@@ -49,8 +49,15 @@ class MainActivity : Activity() {
     private lateinit var expectedStatus: EditText
     private lateinit var intervalSeconds: EditText
     private lateinit var timeoutSeconds: EditText
-    private lateinit var failureThreshold: EditText
     private lateinit var startOnBoot: CheckBox
+    private lateinit var networkRestartEnabled: CheckBox
+    private lateinit var networkRestartDelaySeconds: EditText
+    private lateinit var networkRestartCooldownSeconds: EditText
+    private lateinit var ignoreDuplicateObservedCapabilities: CheckBox
+    private lateinit var healthFailureRestartEnabled: CheckBox
+    private lateinit var healthFailureThreshold: EditText
+    private lateinit var portFailureRestartEnabled: CheckBox
+    private lateinit var portFailureThreshold: EditText
     private lateinit var statusPill: TextView
     private lateinit var statusSummary: TextView
     private lateinit var endpointText: TextView
@@ -186,10 +193,37 @@ class MainActivity : Activity() {
             addView(row(
                 intervalField(),
                 timeoutField(),
-                failureField(),
             ))
             startOnBoot = check("Restore after boot")
             addView(startOnBoot)
+        })
+
+        root.addView(card().apply {
+            addView(section("Restart rules", topPaddingDp = 0))
+            networkRestartEnabled = check("Restart when network changes")
+            addView(networkRestartEnabled)
+            addView(row(
+                networkRestartDelayField(),
+                networkRestartCooldownField(),
+            ))
+            ignoreDuplicateObservedCapabilities = check("Ignore repeated observed capabilities")
+            addView(ignoreDuplicateObservedCapabilities)
+
+            addView(section("Health checks"))
+            healthFailureRestartEnabled = check("Restart after health check failures")
+            addView(healthFailureRestartEnabled)
+            healthFailureThreshold = field("Health failures", InputType.TYPE_CLASS_NUMBER)
+            addView(healthFailureThreshold)
+
+            addView(section("Port checks"))
+            portFailureRestartEnabled = check("Restart after port check failures")
+            addView(portFailureRestartEnabled)
+            portFailureThreshold = field("Port failures", InputType.TYPE_CLASS_NUMBER)
+            addView(portFailureThreshold)
+
+            addView(row(
+                button("Reset rules") { resetRestartRules() },
+            ))
         })
 
         root.addView(card().apply {
@@ -205,6 +239,9 @@ class MainActivity : Activity() {
         })
 
         authEnabled.setOnCheckedChangeListener { _, _ -> updateAuthFields() }
+        networkRestartEnabled.setOnCheckedChangeListener { _, _ -> updateRestartRuleFields() }
+        healthFailureRestartEnabled.setOnCheckedChangeListener { _, _ -> updateRestartRuleFields() }
+        portFailureRestartEnabled.setOnCheckedChangeListener { _, _ -> updateRestartRuleFields() }
 
         scrollView = ScrollView(this).apply {
             setBackgroundColor(COLOR_SCREEN)
@@ -253,9 +290,14 @@ class MainActivity : Activity() {
         return timeoutSeconds
     }
 
-    private fun failureField(): View {
-        failureThreshold = field("Failures", InputType.TYPE_CLASS_NUMBER)
-        return failureThreshold
+    private fun networkRestartDelayField(): View {
+        networkRestartDelaySeconds = field("Restart delay", InputType.TYPE_CLASS_NUMBER)
+        return networkRestartDelaySeconds
+    }
+
+    private fun networkRestartCooldownField(): View {
+        networkRestartCooldownSeconds = field("Cooldown", InputType.TYPE_CLASS_NUMBER)
+        return networkRestartCooldownSeconds
     }
 
     @SuppressLint("SetTextI18n")
@@ -272,13 +314,15 @@ class MainActivity : Activity() {
         expectedStatus.setText(config.expectedStatus)
         intervalSeconds.setText(config.intervalSeconds.toString())
         timeoutSeconds.setText(config.timeoutSeconds.toString())
-        failureThreshold.setText(config.failureThreshold.toString())
         startOnBoot.isChecked = config.startOnBoot
+        applyRestartRules(config.restartRules)
         updateAuthFields()
+        updateRestartRuleFields()
     }
 
     private fun readConfig(): ProxyConfig {
         val current = settingsStore.load()
+        val restartRules = readRestartRules(current.restartRules)
         return current.copy(
             bindAddress = bindAddress.text.toString(),
             httpPort = httpPort.intValue(8080),
@@ -292,8 +336,30 @@ class MainActivity : Activity() {
             expectedStatus = expectedStatus.text.toString(),
             intervalSeconds = intervalSeconds.longValue(300),
             timeoutSeconds = timeoutSeconds.intValue(15),
-            failureThreshold = failureThreshold.intValue(2),
+            failureThreshold = restartRules.healthFailureThreshold,
             startOnBoot = startOnBoot.isChecked,
+            restartRules = restartRules,
+        ).sanitized()
+    }
+
+    private fun readRestartRules(current: RestartRules): RestartRules {
+        return current.copy(
+            networkRestartEnabled = networkRestartEnabled.isChecked,
+            networkRestartDelaySeconds = networkRestartDelaySeconds.longValue(
+                RestartRules.DEFAULT_NETWORK_RESTART_DELAY_SECONDS,
+            ),
+            networkRestartCooldownSeconds = networkRestartCooldownSeconds.longValue(
+                RestartRules.DEFAULT_NETWORK_RESTART_COOLDOWN_SECONDS,
+            ),
+            ignoreDuplicateObservedCapabilities = ignoreDuplicateObservedCapabilities.isChecked,
+            healthFailureRestartEnabled = healthFailureRestartEnabled.isChecked,
+            healthFailureThreshold = healthFailureThreshold.intValue(
+                RestartRules.DEFAULT_HEALTH_FAILURE_THRESHOLD,
+            ),
+            portFailureRestartEnabled = portFailureRestartEnabled.isChecked,
+            portFailureThreshold = portFailureThreshold.intValue(
+                RestartRules.DEFAULT_PORT_FAILURE_THRESHOLD,
+            ),
         ).sanitized()
     }
 
@@ -336,8 +402,28 @@ class MainActivity : Activity() {
             .putExtra(Actions.EXTRA_EXPECTED_STATUS, config.expectedStatus)
             .putExtra(Actions.EXTRA_INTERVAL_SECONDS, config.intervalSeconds)
             .putExtra(Actions.EXTRA_TIMEOUT_SECONDS, config.timeoutSeconds)
-            .putExtra(Actions.EXTRA_FAILURE_THRESHOLD, config.failureThreshold)
+            .putExtra(Actions.EXTRA_FAILURE_THRESHOLD, config.restartRules.healthFailureThreshold)
             .putExtra(Actions.EXTRA_START_ON_BOOT, config.startOnBoot)
+            .putExtra(Actions.EXTRA_NETWORK_RESTART_ENABLED, config.restartRules.networkRestartEnabled)
+            .putExtra(
+                Actions.EXTRA_NETWORK_RESTART_DELAY_SECONDS,
+                config.restartRules.networkRestartDelaySeconds,
+            )
+            .putExtra(
+                Actions.EXTRA_NETWORK_RESTART_COOLDOWN_SECONDS,
+                config.restartRules.networkRestartCooldownSeconds,
+            )
+            .putExtra(
+                Actions.EXTRA_NETWORK_RESTART_IGNORE_DUPLICATE_OBSERVED_CAPABILITIES,
+                config.restartRules.ignoreDuplicateObservedCapabilities,
+            )
+            .putExtra(
+                Actions.EXTRA_HEALTH_FAILURE_RESTART_ENABLED,
+                config.restartRules.healthFailureRestartEnabled,
+            )
+            .putExtra(Actions.EXTRA_HEALTH_FAILURE_THRESHOLD, config.restartRules.healthFailureThreshold)
+            .putExtra(Actions.EXTRA_PORT_FAILURE_RESTART_ENABLED, config.restartRules.portFailureRestartEnabled)
+            .putExtra(Actions.EXTRA_PORT_FAILURE_THRESHOLD, config.restartRules.portFailureThreshold)
         val started = ServiceLauncher.startForeground(this, intent, "ui:${action.substringAfterLast('.')}")
         toast(if (started) successMessage else "service launch failed")
         refreshStatus(updateDetails = true)
@@ -551,6 +637,55 @@ class MainActivity : Activity() {
         password.isEnabled = enabled
         username.alpha = if (enabled) 1f else 0.55f
         password.alpha = if (enabled) 1f else 0.55f
+    }
+
+    private fun applyRestartRules(rules: RestartRules) {
+        val sanitized = rules.sanitized()
+        networkRestartEnabled.isChecked = sanitized.networkRestartEnabled
+        networkRestartDelaySeconds.setText(sanitized.networkRestartDelaySeconds.toString())
+        networkRestartCooldownSeconds.setText(sanitized.networkRestartCooldownSeconds.toString())
+        ignoreDuplicateObservedCapabilities.isChecked = sanitized.ignoreDuplicateObservedCapabilities
+        healthFailureRestartEnabled.isChecked = sanitized.healthFailureRestartEnabled
+        healthFailureThreshold.setText(sanitized.healthFailureThreshold.toString())
+        portFailureRestartEnabled.isChecked = sanitized.portFailureRestartEnabled
+        portFailureThreshold.setText(sanitized.portFailureThreshold.toString())
+    }
+
+    private fun updateRestartRuleFields() {
+        val networkEnabled = networkRestartEnabled.isChecked
+        networkRestartDelaySeconds.isEnabled = networkEnabled
+        networkRestartCooldownSeconds.isEnabled = networkEnabled
+        ignoreDuplicateObservedCapabilities.isEnabled = networkEnabled
+        val networkAlpha = if (networkEnabled) 1f else 0.55f
+        networkRestartDelaySeconds.alpha = networkAlpha
+        networkRestartCooldownSeconds.alpha = networkAlpha
+        ignoreDuplicateObservedCapabilities.alpha = networkAlpha
+
+        val healthEnabled = healthFailureRestartEnabled.isChecked
+        healthFailureThreshold.isEnabled = healthEnabled
+        healthFailureThreshold.alpha = if (healthEnabled) 1f else 0.55f
+
+        val portEnabled = portFailureRestartEnabled.isChecked
+        portFailureThreshold.isEnabled = portEnabled
+        portFailureThreshold.alpha = if (portEnabled) 1f else 0.55f
+    }
+
+    private fun resetRestartRules() {
+        val defaults = RestartRules()
+        applyRestartRules(defaults)
+        updateRestartRuleFields()
+        val saved = settingsStore.load().copy(
+            failureThreshold = defaults.healthFailureThreshold,
+            restartRules = defaults,
+        ).sanitized()
+        settingsStore.save(saved)
+        val status = statusStore.loadFromDisk()
+        if (status.serviceRunning || status.desiredRunning || status.proxyRunning) {
+            launchService(Actions.APPLY_CONFIG, saved, "Restart rules reset")
+        } else {
+            toast("Restart rules reset")
+            refreshStatus(updateDetails = true)
+        }
     }
 
     @SuppressLint("BatteryLife")

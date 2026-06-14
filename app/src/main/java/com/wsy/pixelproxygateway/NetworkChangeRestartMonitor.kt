@@ -18,6 +18,7 @@ class NetworkChangeRestartMonitor(
     private val statusStore: StatusStore,
     private val scheduler: ScheduledExecutorService,
     private val desiredRunningProvider: () -> Boolean,
+    private val restartRulesProvider: () -> RestartRules,
     private val restartProxy: (String) -> Unit,
     private val onStatusChanged: () -> Unit,
 ) {
@@ -163,6 +164,7 @@ class NetworkChangeRestartMonitor(
     private fun recordObservedNetworkEvent(event: String, network: Network) {
         if (network == connectivityManager.activeNetwork) return
         val eventDetail = networkDetail("event", network)
+        val rules = restartRulesProvider().sanitized()
         val eligibility = synchronized(lock) {
             val networkId = network.toString()
             val previousKey = lastObservedNetworkKeys[networkId]
@@ -170,6 +172,7 @@ class NetworkChangeRestartMonitor(
                 event = event,
                 observedNetworkKey = eventDetail.key,
                 previousObservedNetworkKey = previousKey,
+                rules = rules,
             )
             if (event == "observed_lost") {
                 lastObservedNetworkKeys.remove(networkId)
@@ -234,22 +237,30 @@ class NetworkChangeRestartMonitor(
             return
         }
 
-        scheduleRestart(event, sequence)
+        val rules = restartRulesProvider().sanitized()
+        if (!rules.networkRestartEnabled) {
+            logStore.append("app", "network restart skipped seq=$sequence event=$event reason=disabled")
+            onStatusChanged()
+            return
+        }
+
+        scheduleRestart(event, sequence, rules)
         onStatusChanged()
     }
 
-    private fun scheduleRestart(trigger: String, sequence: Long) {
+    private fun scheduleRestart(trigger: String, sequence: Long, rules: RestartRules) {
+        val delaySeconds = rules.networkRestartDelaySeconds
         synchronized(lock) {
             pendingRestart?.cancel(false)
             pendingRestart = scheduler.schedule(
                 { runScheduledRestart(trigger, sequence) },
-                NetworkChangeRestartPolicy.RESTART_DELAY_SECONDS,
+                delaySeconds,
                 TimeUnit.SECONDS,
             )
         }
         logStore.append(
             "app",
-            "network restart scheduled trigger=$trigger seq=$sequence delay=${NetworkChangeRestartPolicy.RESTART_DELAY_SECONDS}s",
+            "network restart scheduled trigger=$trigger seq=$sequence delay=${delaySeconds}s",
         )
     }
 
@@ -293,6 +304,7 @@ class NetworkChangeRestartMonitor(
                 activeNetworkKey = snapshot.key,
                 lastRestartAtMillis = lastRestartAtMillis,
                 lastRestartNetworkKey = lastRestartNetworkKey,
+                rules = restartRulesProvider().sanitized(),
             )
         }
         val checkedAt = TimeUtil.format(nowMillis)

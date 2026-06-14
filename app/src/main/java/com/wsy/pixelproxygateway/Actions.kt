@@ -22,4 +22,13 @@ object Actions {
     const val EXTRA_TIMEOUT_SECONDS = "timeout_seconds"
     const val EXTRA_FAILURE_THRESHOLD = "failure_threshold"
     const val EXTRA_START_ON_BOOT = "start_on_boot"
+    const val EXTRA_NETWORK_RESTART_ENABLED = "network_restart_enabled"
+    const val EXTRA_NETWORK_RESTART_DELAY_SECONDS = "network_restart_delay_seconds"
+    const val EXTRA_NETWORK_RESTART_COOLDOWN_SECONDS = "network_restart_cooldown_seconds"
+    const val EXTRA_NETWORK_RESTART_IGNORE_DUPLICATE_OBSERVED_CAPABILITIES =
+        "network_restart_ignore_duplicate_observed_capabilities"
+    const val EXTRA_HEALTH_FAILURE_RESTART_ENABLED = "health_failure_restart_enabled"
+    const val EXTRA_HEALTH_FAILURE_THRESHOLD = "health_failure_threshold"
+    const val EXTRA_PORT_FAILURE_RESTART_ENABLED = "port_failure_restart_enabled"
+    const val EXTRA_PORT_FAILURE_THRESHOLD = "port_failure_threshold"
 }

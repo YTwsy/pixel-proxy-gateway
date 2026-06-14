@@ -32,6 +32,7 @@ class ProxyForegroundService : Service() {
     private var requestFuture: ScheduledFuture<*>? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastNotificationSnapshot: NotificationSnapshot? = null
+    private var consecutivePortFailures = 0
     @Volatile private var config = ProxyConfig()
 
     override fun onCreate() {
@@ -47,6 +48,7 @@ class ProxyForegroundService : Service() {
             statusStore = statusStore,
             scheduler = scheduler,
             desiredRunningProvider = { statusStore.current().desiredRunning },
+            restartRulesProvider = { config.restartRules },
             restartProxy = { reason -> manager.restart(config, reason) },
             onStatusChanged = { updateNotification() },
         )
@@ -258,6 +260,7 @@ class ProxyForegroundService : Service() {
     private fun startWatchdogs() {
         processFuture?.cancel(false)
         requestFuture?.cancel(false)
+        consecutivePortFailures = 0
         processFuture = scheduler.scheduleWithFixedDelay({
             runCatching {
                 acquireWakeLock()
@@ -272,7 +275,21 @@ class ProxyForegroundService : Service() {
                         lastError = if (ok) it.lastError else message,
                     )
                 }
-                if (!ok && statusStore.current().desiredRunning) manager.restart("port_watchdog:$message")
+                if (ok) {
+                    consecutivePortFailures = 0
+                } else {
+                    val rules = config.restartRules
+                    consecutivePortFailures += 1
+                    logStore.append("app", "port watchdog fail count=$consecutivePortFailures error=$message")
+                    if (
+                        statusStore.current().desiredRunning &&
+                        rules.portFailureRestartEnabled &&
+                        consecutivePortFailures >= rules.portFailureThreshold
+                    ) {
+                        manager.restart("port_watchdog:$message")
+                        consecutivePortFailures = 0
+                    }
+                }
                 updateNotification()
             }.getOrElse {
                 logStore.append("app", "port watchdog error=${it.message}")
@@ -296,7 +313,13 @@ class ProxyForegroundService : Service() {
                 if (!result.ok) {
                     logStore.append("app", "request watchdog fail count=${next.consecutiveFailures} error=${result.error}")
                 }
-                if (!result.ok && next.consecutiveFailures >= config.failureThreshold) {
+                val rules = config.restartRules
+                if (
+                    !result.ok &&
+                    statusStore.current().desiredRunning &&
+                    rules.healthFailureRestartEnabled &&
+                    next.consecutiveFailures >= rules.healthFailureThreshold
+                ) {
                     manager.restart("request_watchdog:${result.error}")
                     statusStore.update { it.copy(consecutiveFailures = 0) }
                 }
@@ -312,6 +335,7 @@ class ProxyForegroundService : Service() {
         requestFuture?.cancel(false)
         processFuture = null
         requestFuture = null
+        consecutivePortFailures = 0
     }
 
     private fun acquireWakeLock() {
@@ -503,7 +527,8 @@ private fun ProxyConfig.withHealthSettingsFrom(requested: ProxyConfig): ProxyCon
         expectedStatus = requested.expectedStatus,
         intervalSeconds = requested.intervalSeconds,
         timeoutSeconds = requested.timeoutSeconds,
-        failureThreshold = requested.failureThreshold,
+        failureThreshold = requested.restartRules.healthFailureThreshold,
+        restartRules = requested.restartRules,
         startOnBoot = requested.startOnBoot,
     ).sanitized()
 }
