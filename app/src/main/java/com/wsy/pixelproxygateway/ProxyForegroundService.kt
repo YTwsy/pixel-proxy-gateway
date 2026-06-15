@@ -33,6 +33,7 @@ class ProxyForegroundService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastNotificationSnapshot: NotificationSnapshot? = null
     private var consecutivePortFailures = 0
+    @Volatile private var destroying = false
     @Volatile private var config = ProxyConfig()
 
     override fun onCreate() {
@@ -41,7 +42,12 @@ class ProxyForegroundService : Service() {
         logStore = LogStore(this)
         statusStore = StatusStore(this)
         statusStore.loadFromDisk()
-        manager = GostProcessManager(this, logStore, statusStore)
+        manager = GostProcessManager(
+            context = this,
+            logStore = logStore,
+            statusStore = statusStore,
+            onStatusChanged = { if (!destroying) updateNotification() },
+        )
         networkChangeRestartMonitor = NetworkChangeRestartMonitor(
             context = this,
             logStore = logStore,
@@ -488,6 +494,7 @@ class ProxyForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        destroying = true
         logStore.append("app", "service destroyed")
         statusStore.update { it.copy(serviceRunning = false) }
         networkChangeRestartMonitor.stop()

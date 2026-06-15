@@ -13,6 +13,7 @@ class GostProcessManager(
     context: Context,
     private val logStore: LogStore,
     private val statusStore: StatusStore,
+    private val onStatusChanged: () -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val installer = GostBinaryInstaller(appContext, logStore)
@@ -37,7 +38,7 @@ class GostProcessManager(
             return
         }
         desiredRunning = true
-        statusStore.update {
+        updateStatus {
             it.copy(
                 desiredRunning = true,
                 bindAddress = config.bindAddress,
@@ -69,7 +70,7 @@ class GostProcessManager(
         val stopped = stopCurrentProcess(reason)
         val current = process
         val currentPid = ProcessUtil.pidOf(current)
-        statusStore.update {
+        updateStatus {
             it.copy(
                 desiredRunning = false,
                 proxyRunning = !stopped && current?.isAlive == true,
@@ -90,7 +91,7 @@ class GostProcessManager(
             return
         }
         desiredRunning = true
-        statusStore.update {
+        updateStatus {
             it.copy(
                 desiredRunning = true,
                 startOnBoot = config.startOnBoot,
@@ -116,7 +117,7 @@ class GostProcessManager(
     fun markProcessCheck() {
         val current = process
         val running = current?.isAlive == true
-        statusStore.update { it.copy(proxyRunning = running, proxyPid = ProcessUtil.pidOf(current)) }
+        updateStatus { it.copy(proxyRunning = running, proxyPid = ProcessUtil.pidOf(current)) }
         if (desiredRunning && !running) {
             scheduleRestart("process_watchdog", immediate = false)
         }
@@ -129,7 +130,7 @@ class GostProcessManager(
                 if (current.isAlive) {
                     val pid = ProcessUtil.pidOf(current)
                     logStore.append("app", "gost start deferred reason=$reason current_pid=$pid")
-                    statusStore.update {
+                    updateStatus {
                         it.copy(proxyRunning = true, proxyPid = pid, lastError = "gost still stopping:$reason")
                     }
                     if (desiredRunning) scheduleRestart("start_deferred:$reason", immediate = false)
@@ -153,7 +154,7 @@ class GostProcessManager(
             process = started
             val pid = ProcessUtil.pidOf(started)
             logStore.append("app", "gost started pid=$pid reason=$reason")
-            statusStore.update {
+            updateStatus {
                 it.copy(
                     proxyRunning = true,
                     proxyPid = pid,
@@ -174,7 +175,7 @@ class GostProcessManager(
         }.getOrElse { throwable ->
             val message = throwable.message ?: throwable.javaClass.simpleName
             logStore.append("app", "gost start failed error=$message")
-            statusStore.update {
+            updateStatus {
                 it.copy(proxyRunning = false, proxyPid = -1, lastError = message)
             }
             if (desiredRunning) scheduleRestart("start_failed:$message", immediate = false)
@@ -207,7 +208,7 @@ class GostProcessManager(
             logStore.append("app", "ignoring stale gost exit pid=$pid code=$exitCode")
             return
         }
-        statusStore.update {
+        updateStatus {
             it.copy(
                 proxyRunning = false,
                 proxyPid = -1,
@@ -222,7 +223,7 @@ class GostProcessManager(
     private fun rejectInvalidStart(error: String, reason: String) {
         logStore.append("app", "gost start rejected reason=$reason error=$error")
         stop("invalid_config:$reason")
-        statusStore.update {
+        updateStatus {
             it.copy(
                 desiredRunning = false,
                 proxyRunning = false,
@@ -248,7 +249,7 @@ class GostProcessManager(
         val delay = next.delaySeconds
         restartDelaySeconds = next.nextDelaySeconds
         logStore.append("app", "scheduling gost restart reason=$reason delay=${delay}s")
-        statusStore.update { it.copy(lastRestartReason = reason, lastError = reason) }
+        updateStatus { it.copy(lastRestartReason = reason, lastError = reason) }
         restartFuture = supervisor.schedule({ runScheduledRestart(reason) }, delay, TimeUnit.SECONDS)
     }
 
@@ -299,7 +300,7 @@ class GostProcessManager(
         }
 
         logStore.append("app", "gost still alive pid=$pid reason=$reason")
-        statusStore.update {
+        updateStatus {
             it.copy(proxyRunning = true, proxyPid = pid, lastError = "gost stop timed out:$reason")
         }
         return false
@@ -327,8 +328,15 @@ class GostProcessManager(
         if (remaining.isEmpty()) return true
         val message = "untracked gost still running pids=${remaining.joinToString(",")}"
         logStore.append("app", "$message reason=$reason")
-        statusStore.update { it.copy(lastError = message) }
+        updateStatus { it.copy(lastError = message) }
         return false
+    }
+
+    private fun updateStatus(transform: (RuntimeStatus) -> RuntimeStatus): RuntimeStatus {
+        val next = statusStore.update(transform)
+        runCatching { onStatusChanged() }
+            .onFailure { logStore.append("app", "status change callback failed error=${it.message}") }
+        return next
     }
 
     private fun runningGostPids(): List<Long> {
