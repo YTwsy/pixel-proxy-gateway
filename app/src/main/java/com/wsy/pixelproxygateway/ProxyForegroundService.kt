@@ -10,8 +10,11 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.widget.Toast
 import java.io.FileDescriptor
 import java.io.PrintWriter
 import java.util.concurrent.Executors
@@ -27,6 +30,7 @@ class ProxyForegroundService : Service() {
     private lateinit var networkChangeRestartMonitor: NetworkChangeRestartMonitor
     private lateinit var notificationManager: NotificationManager
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(2)
     private var processFuture: ScheduledFuture<*>? = null
     private var requestFuture: ScheduledFuture<*>? = null
@@ -115,6 +119,7 @@ class ProxyForegroundService : Service() {
                 manager.restart(config, "adb_or_ui_restart")
             }
             Actions.CHECK_HEALTH -> {
+                toast("Checking health")
                 config = config.withHealthSettingsFrom(updated)
                 settingsStore.save(config)
                 statusStore.update {
@@ -257,8 +262,10 @@ class ProxyForegroundService : Service() {
                 }
                 logStore.append("app", HealthStatus.logLine(result))
                 updateNotification()
+                toast(if (result.ok) "Health ok" else "Health failed")
             }.getOrElse {
                 logStore.append("app", "manual health check error=${it.message}")
+                toast("Health failed")
             }
         }
     }
@@ -424,6 +431,12 @@ class ProxyForegroundService : Service() {
             Intent(this, ProxyForegroundService::class.java).setAction(Actions.RESTART),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val healthPending = PendingIntent.getService(
+            this,
+            3,
+            Intent(this, ProxyForegroundService::class.java).setAction(Actions.CHECK_HEALTH),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val listeners = notificationListenerSummary()
         val text = if (status.proxyRunning && status.portOk && status.requestOk) {
             "$listeners; health ok"
@@ -447,6 +460,13 @@ class ProxyForegroundService : Service() {
             .setCategory(Notification.CATEGORY_SERVICE)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setShowWhen(false)
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, R.drawable.ic_notification_proxy_small),
+                    "Health",
+                    healthPending,
+                ).build(),
+            )
             .addAction(
                 Notification.Action.Builder(
                     Icon.createWithResource(this, R.drawable.ic_notification_proxy_small),
@@ -484,6 +504,12 @@ class ProxyForegroundService : Service() {
 
     private fun shouldKeepNotification(status: RuntimeStatus): Boolean {
         return status.serviceRunning || status.desiredRunning || status.proxyRunning
+    }
+
+    private fun toast(message: String) {
+        mainHandler.post {
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun dump(fd: FileDescriptor?, writer: PrintWriter, args: Array<out String>?) {

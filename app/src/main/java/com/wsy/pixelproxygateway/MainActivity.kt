@@ -387,7 +387,12 @@ class MainActivity : Activity() {
         launchService(action, config, action.substringAfterLast('.').lowercase())
     }
 
-    private fun launchService(action: String, config: ProxyConfig, successMessage: String): Boolean {
+    private fun launchService(
+        action: String,
+        config: ProxyConfig,
+        successMessage: String,
+        toastOnSuccess: Boolean = true,
+    ): Boolean {
         val intent = Intent(this, ProxyForegroundService::class.java)
             .setAction(action)
             .putExtra(Actions.EXTRA_BIND_ADDRESS, config.bindAddress)
@@ -425,7 +430,9 @@ class MainActivity : Activity() {
             .putExtra(Actions.EXTRA_PORT_FAILURE_RESTART_ENABLED, config.restartRules.portFailureRestartEnabled)
             .putExtra(Actions.EXTRA_PORT_FAILURE_THRESHOLD, config.restartRules.portFailureThreshold)
         val started = ServiceLauncher.startForeground(this, intent, "ui:${action.substringAfterLast('.')}")
-        toast(if (started) successMessage else "service launch failed")
+        if (!started || toastOnSuccess) {
+            toast(if (started) successMessage else "service launch failed")
+        }
         refreshStatus(updateDetails = true)
         return started
     }
@@ -454,7 +461,12 @@ class MainActivity : Activity() {
         }
         val status = statusStore.loadFromDisk()
         if (status.serviceRunning || status.desiredRunning || status.proxyRunning) {
-            val started = launchService(Actions.CHECK_HEALTH, config, "Checking health")
+            val started = launchService(
+                Actions.CHECK_HEALTH,
+                config,
+                "Checking health",
+                toastOnSuccess = false,
+            )
             if (started) {
                 handler.postDelayed({ refreshStatus(updateDetails = true) }, 1_000)
                 handler.postDelayed({ refreshStatus(updateDetails = true) }, 3_000)
